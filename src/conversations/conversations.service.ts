@@ -17,35 +17,10 @@ import type {
   ConversationResponse,
   MessageResponse,
 } from './dto/conversation-response.dto';
-
-type PopulatedUser = {
-  _id: Types.ObjectId;
-  avatarUrl?: string;
-  showOnlineStatus?: boolean;
-  status?: string;
-  username: string;
-};
-
-type ConversationObject = {
-  _id: Types.ObjectId;
-  lastMessage?: string;
-  lastMessageAt?: Date;
-  participants: PopulatedUser[];
-  typing?: Array<{ user: Types.ObjectId | PopulatedUser; expiresAt: Date }>;
-  unreadCounts?: Map<string, number> | Record<string, number>;
-  updatedAt?: Date;
-};
-
-type MessageObject = {
-  _id: Types.ObjectId;
-  body: string;
-  createdAt?: Date;
-  deliveredTo?: Types.ObjectId[];
-  readBy?: Array<{ user: Types.ObjectId; readAt: Date }>;
-  sender: PopulatedUser;
-};
-
-type UnreadCounts = Map<string, number> | Record<string, number> | undefined;
+import {
+  mapConversationDocumentToResponse,
+  mapMessageDocumentToResponse,
+} from './conversation-response.mapper';
 
 const TYPING_TTL_MS = 6000;
 
@@ -78,10 +53,7 @@ export class ConversationsService {
       .exec();
 
     return conversations.map((conversation) =>
-      this.toConversationResponse(
-        conversation.toObject() as unknown as ConversationObject,
-        userId,
-      ),
+      mapConversationDocumentToResponse(conversation, userId),
     );
   }
 
@@ -141,10 +113,7 @@ export class ConversationsService {
       },
     ]);
 
-    return this.toConversationResponse(
-      populated.toObject() as unknown as ConversationObject,
-      userId,
-    );
+    return mapConversationDocumentToResponse(populated, userId);
   }
 
   async findMessages(
@@ -156,14 +125,11 @@ export class ConversationsService {
     const messages = await this.messageModel
       .find({ conversation: new Types.ObjectId(conversationId) })
       .sort({ createdAt: 1 })
-      .populate<{ sender: PopulatedUser }>('sender', 'username avatarUrl')
+      .populate('sender', 'username avatarUrl')
       .exec();
 
     return messages.map((message) =>
-      this.toMessageResponse(
-        message.toObject() as unknown as MessageObject,
-        userId,
-      ),
+      mapMessageDocumentToResponse(message, userId),
     );
   }
 
@@ -225,15 +191,12 @@ export class ConversationsService {
       ),
     );
 
-    const populated = await message.populate<{ sender: PopulatedUser }>(
+    const populated = await message.populate(
       'sender',
       'username avatarUrl',
     );
 
-    return this.toMessageResponse(
-      populated.toObject() as unknown as MessageObject,
-      userId,
-    );
+    return mapMessageDocumentToResponse(populated, userId);
   }
 
   async markRead(
@@ -274,10 +237,7 @@ export class ConversationsService {
       },
     ]);
 
-    return this.toConversationResponse(
-      populated.toObject() as unknown as ConversationObject,
-      userId,
-    );
+    return mapConversationDocumentToResponse(populated, userId);
   }
 
   async updateTyping(
@@ -331,10 +291,7 @@ export class ConversationsService {
       },
     ]);
 
-    return this.toConversationResponse(
-      populated.toObject() as unknown as ConversationObject,
-      userId,
-    );
+    return mapConversationDocumentToResponse(populated, userId);
   }
 
   private async assertParticipant(userId: string, conversationId: string) {
@@ -359,107 +316,4 @@ export class ConversationsService {
     return conversation;
   }
 
-  private toConversationResponse(
-    conversation: ConversationObject,
-    currentUserId: string,
-  ): ConversationResponse {
-    const otherParticipant =
-      conversation.participants.find(
-        (participant) => participant._id.toString() !== currentUserId,
-      ) ?? conversation.participants[0];
-
-    const unreadCount = this.getUnreadCount(
-      conversation.unreadCounts,
-      currentUserId,
-    );
-    const now = Date.now();
-    const typingUsers = (conversation.typing ?? [])
-      .filter(
-        (entry) =>
-          this.getTypingUserId(entry.user) !== currentUserId &&
-          new Date(entry.expiresAt).getTime() > now,
-      )
-      .map((entry) => {
-        const user = entry.user as PopulatedUser;
-        return user.username ?? '';
-      })
-      .filter(Boolean);
-
-    return {
-      id: conversation._id.toString(),
-      handle: `@${otherParticipant.username.toLowerCase().replace(/\s+/g, '_')}`,
-      lastMessage: conversation.lastMessage || 'No messages yet',
-      lastMessageAt:
-        conversation.lastMessageAt?.toISOString() ??
-        conversation.updatedAt?.toISOString() ??
-        null,
-      participant: {
-        avatarUrl: otherParticipant.avatarUrl || null,
-        id: otherParticipant._id.toString(),
-        name: otherParticipant.username,
-        status:
-          otherParticipant.showOnlineStatus === false
-            ? 'away'
-            : (otherParticipant.status ?? 'available'),
-      },
-      typingUsers,
-      unreadCount,
-      user: otherParticipant.username,
-    };
-  }
-
-  private toMessageResponse(
-    message: MessageObject,
-    currentUserId: string,
-  ): MessageResponse {
-    const senderId = message.sender._id.toString();
-
-    return {
-      id: message._id.toString(),
-      delivered: Boolean(message.deliveredTo?.length),
-      isOwn: senderId === currentUserId,
-      read: Boolean(
-        message.readBy?.some((entry) => entry.user.toString() !== senderId),
-      ),
-      sender: {
-        avatarUrl: message.sender.avatarUrl || null,
-        id: senderId,
-        name: message.sender.username,
-      },
-      text: message.body,
-      time: (message.createdAt ?? new Date()).toISOString(),
-    };
-  }
-
-  private getTypingUserId(user: Types.ObjectId | PopulatedUser) {
-    return user instanceof Types.ObjectId
-      ? user.toString()
-      : user._id.toString();
-  }
-
-  private toUnreadCountsMap(unreadCounts: UnreadCounts) {
-    if (unreadCounts instanceof Map) {
-      return new Map(
-        Array.from(unreadCounts.entries()).map(([key, value]) => [
-          key,
-          Number(value) || 0,
-        ]),
-      );
-    }
-
-    return new Map(
-      Object.entries(unreadCounts ?? {}).map(([key, value]) => [
-        key,
-        Number(value) || 0,
-      ]),
-    );
-  }
-
-  private getUnreadCount(unreadCounts: UnreadCounts, userId: string) {
-    if (unreadCounts instanceof Map) {
-      return Number(unreadCounts.get(userId) ?? 0);
-    }
-
-    return Number(unreadCounts?.[userId] ?? 0);
-  }
 }

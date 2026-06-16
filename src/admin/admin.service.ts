@@ -11,23 +11,12 @@ import { Report } from '../posts/schemas/report.schema';
 import type { ReportDocument } from '../posts/schemas/report.schema';
 import { User } from '../users/schemas/user.schema';
 import type { UserDocument } from '../users/schemas/user.schema';
+import {
+  mapLeanReportToAdminReport,
+  type LeanAdminReport,
+} from './admin-report.mapper';
 
 const REPORT_STATUSES = ['open', 'reviewed', 'dismissed', 'actioned'];
-
-type LeanReport = {
-  _id: Types.ObjectId;
-  createdAt?: Date;
-  details: string;
-  reason: string;
-  reporter?: {
-    _id: Types.ObjectId;
-    email: string;
-    username: string;
-  } | null;
-  status: string;
-  targetId: string;
-  targetType: string;
-};
 
 @Injectable()
 export class AdminService {
@@ -135,26 +124,10 @@ export class AdminService {
       .sort({ createdAt: -1 })
       .limit(100)
       .populate('reporter', 'username email')
-      .lean()
+      .lean<LeanAdminReport[]>()
       .exec();
 
-    return (reports as unknown as LeanReport[]).map((report) => ({
-      createdAt: report.createdAt,
-      details: report.details,
-      id: report._id.toString(),
-      reason: report.reason,
-      reporter:
-        report.reporter && typeof report.reporter === 'object'
-          ? {
-              email: report.reporter.email,
-              id: report.reporter._id.toString(),
-              username: report.reporter.username,
-            }
-          : null,
-      status: report.status,
-      targetId: report.targetId,
-      targetType: report.targetType,
-    }));
+    return reports.map(mapLeanReportToAdminReport);
   }
 
   async updateReport(id: string, status = '') {

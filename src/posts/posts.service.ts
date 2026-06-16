@@ -13,10 +13,13 @@ import type { FeedPostResponse } from './dto/post-response.dto';
 import { RelationshipService } from '../users/relationship.service';
 import { PostFeedMapper } from './post-feed.mapper';
 import { PostReportsService } from './post-reports.service';
+import {
+  mapPostDocumentToFeedModel,
+  mapPostDocumentsToFeedModels,
+} from './post-document.mapper';
 import type {
   PopulatedAuthor,
   PopulatedComment,
-  PostWithAuthor,
 } from './post-feed.types';
 
 type AuthUser = {
@@ -84,12 +87,10 @@ export class PostsService {
       .populate('comments.replies.author', 'username email')
       .exec();
 
-    const filteredPosts = posts
-      .map((post) => post.toObject() as unknown as PostWithAuthor)
-      .filter((post) => {
-        const authorId = post.author?._id?.toString();
-        return !authorId || !hiddenAuthorIds.has(authorId);
-      });
+    const filteredPosts = mapPostDocumentsToFeedModels(posts).filter((post) => {
+      const authorId = post.author?._id?.toString();
+      return !authorId || !hiddenAuthorIds.has(authorId);
+    });
     const sortedPosts =
       sort === 'top'
         ? filteredPosts.sort(
@@ -147,7 +148,7 @@ export class PostsService {
     });
 
     return this.postFeedMapper.toFeedPost(
-      populatedPost.toObject() as unknown as PostWithAuthor,
+      mapPostDocumentToFeedModel(populatedPost),
       user.id,
     );
   }
@@ -196,7 +197,7 @@ export class PostsService {
     );
 
     return this.postFeedMapper.toFeedPost(
-      populatedPost.toObject() as unknown as PostWithAuthor,
+      mapPostDocumentToFeedModel(populatedPost),
       user.id,
     );
   }
@@ -242,7 +243,7 @@ export class PostsService {
     ]);
 
     return this.postFeedMapper.toFeedPost(
-      populatedPost.toObject() as unknown as PostWithAuthor,
+      mapPostDocumentToFeedModel(populatedPost),
       user.id,
     );
   }
@@ -358,7 +359,7 @@ export class PostsService {
     ]);
 
     return this.postFeedMapper.toFeedPost(
-      populatedPost.toObject() as unknown as PostWithAuthor,
+      mapPostDocumentToFeedModel(populatedPost),
       user.id,
     );
   }
@@ -510,7 +511,7 @@ export class PostsService {
     ]);
 
     return this.postFeedMapper.toFeedPost(
-      populatedPost.toObject() as unknown as PostWithAuthor,
+      mapPostDocumentToFeedModel(populatedPost),
       userId,
     );
   }
