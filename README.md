@@ -68,7 +68,7 @@ Recommended local values:
 
 ```env
 MONGODB_URI=mongodb://localhost:27017/socialmedia
-CLIENT_ORIGIN=http://localhost:3001
+CLIENT_ORIGINS=http://localhost:3001
 JWT_SECRET=replace-with-a-long-random-secret-at-least-32-chars
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
@@ -141,8 +141,17 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
 The backend must allow the frontend origin:
 
 ```env
-CLIENT_ORIGIN=http://localhost:3001
+CLIENT_ORIGINS=http://localhost:3001
 ```
+
+Use a comma-separated list when you need to allow dev, preview, and production
+frontends:
+
+```env
+CLIENT_ORIGINS=http://localhost:3001,https://preview.example.com,https://app.example.com
+```
+
+`CLIENT_ORIGIN` is still accepted for older local `.env` files.
 
 ## GitHub Push
 

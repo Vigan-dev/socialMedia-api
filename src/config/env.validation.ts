@@ -1,5 +1,41 @@
 type Environment = Record<string, string | undefined>;
 
+const defaultClientOrigin = 'http://localhost:3001';
+
+function parseClientOrigins(value: string) {
+  const origins = value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => {
+      let url: URL;
+
+      try {
+        url = new URL(origin);
+      } catch {
+        throw new Error('CLIENT_ORIGINS must contain valid URLs');
+      }
+
+      if (!['http:', 'https:'].includes(url.protocol)) {
+        throw new Error('CLIENT_ORIGINS must only contain http or https URLs');
+      }
+
+      if (url.pathname !== '/' || url.search || url.hash) {
+        throw new Error(
+          'CLIENT_ORIGINS values must be origins without paths, query strings, or fragments',
+        );
+      }
+
+      return url.origin;
+    });
+
+  if (origins.length === 0) {
+    throw new Error('CLIENT_ORIGINS must include at least one origin');
+  }
+
+  return [...new Set(origins)];
+}
+
 export function validateEnvironment(config: Environment) {
   const mongodbUri = config.MONGODB_URI;
   const jwtSecret = config.JWT_SECRET?.trim();
@@ -32,6 +68,12 @@ export function validateEnvironment(config: Environment) {
   if (config.PORT && Number.isNaN(Number(config.PORT))) {
     throw new Error('PORT must be a number');
   }
+
+  const clientOrigins = parseClientOrigins(
+    config.CLIENT_ORIGINS ?? config.CLIENT_ORIGIN ?? defaultClientOrigin,
+  );
+  config.CLIENT_ORIGINS = clientOrigins.join(',');
+  config.CLIENT_ORIGIN = clientOrigins[0];
 
   if (config.OLLAMA_HOST && !URL.canParse(config.OLLAMA_HOST)) {
     throw new Error('OLLAMA_HOST must be a valid URL');
