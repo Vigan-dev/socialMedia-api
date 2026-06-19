@@ -81,9 +81,9 @@ describe('AuthService', () => {
 
     const refreshTokenHash = usersService.updateRefreshTokenHash.mock
       .calls[0][1] as string;
-    await expect(bcrypt.compare('refresh-token', refreshTokenHash)).resolves.toBe(
-      true,
-    );
+    await expect(
+      bcrypt.compare('refresh-token', refreshTokenHash),
+    ).resolves.toBe(true);
   });
 
   it('rejects login when the password is invalid', async () => {

@@ -191,10 +191,7 @@ export class ConversationsService {
       ),
     );
 
-    const populated = await message.populate(
-      'sender',
-      'username avatarUrl',
-    );
+    const populated = await message.populate('sender', 'username avatarUrl');
 
     return mapMessageDocumentToResponse(populated, userId);
   }
@@ -220,7 +217,9 @@ export class ConversationsService {
       { $set: { [`unreadCounts.${userId}`]: 0 } },
     );
 
-    const updatedConversation = await this.conversationModel.findById(conversation._id);
+    const updatedConversation = await this.conversationModel.findById(
+      conversation._id,
+    );
 
     if (!updatedConversation) {
       throw new NotFoundException('Conversation not found');
@@ -274,7 +273,9 @@ export class ConversationsService {
       );
     }
 
-    const updatedConversation = await this.conversationModel.findById(conversation._id);
+    const updatedConversation = await this.conversationModel.findById(
+      conversation._id,
+    );
 
     if (!updatedConversation) {
       throw new NotFoundException('Conversation not found');
@@ -315,5 +316,4 @@ export class ConversationsService {
 
     return conversation;
   }
-
 }

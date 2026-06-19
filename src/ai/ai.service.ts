@@ -37,7 +37,11 @@ export class AiService {
     private readonly supportChatConversationModel: Model<SupportChatConversationDocument>,
   ) {}
 
-  async createSupportReply(userId: string, message: string, sessionId?: string) {
+  async createSupportReply(
+    userId: string,
+    message: string,
+    sessionId?: string,
+  ) {
     const trimmedMessage = message?.trim();
 
     if (!trimmedMessage) {
@@ -184,10 +188,7 @@ export class AiService {
       .lean()
       .exec();
 
-    if (
-      existingConversation &&
-      existingConversation.userId !== userId
-    ) {
+    if (existingConversation && existingConversation.userId !== userId) {
       return randomUUID();
     }
 

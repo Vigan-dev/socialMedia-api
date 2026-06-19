@@ -32,9 +32,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 }
 
-function extractCookie(request: Request | undefined, name: string) {
-  if (request?.cookies?.[name]) {
-    return request.cookies[name];
+function extractCookie(
+  request: Request | undefined,
+  name: string,
+): string | null {
+  const cookies: unknown = request?.cookies;
+  if (cookies && typeof cookies === 'object') {
+    const value = (cookies as Record<string, unknown>)[name];
+    if (typeof value === 'string') {
+      return value;
+    }
   }
 
   const cookieHeader = request?.headers.cookie;

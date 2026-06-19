@@ -163,11 +163,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired reset token');
     }
 
-    const didResetPassword = await this.usersService.updatePasswordWithResetToken(
-      user._id.toString(),
-      await bcrypt.hash(password, 10),
-      user.passwordResetTokenHash,
-    );
+    const didResetPassword =
+      await this.usersService.updatePasswordWithResetToken(
+        user._id.toString(),
+        await bcrypt.hash(password, 10),
+        user.passwordResetTokenHash,
+      );
 
     if (!didResetPassword) {
       throw new UnauthorizedException('Invalid or expired reset token');

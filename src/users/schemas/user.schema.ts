@@ -4,7 +4,7 @@ import { userRoles, type UserRole } from '../../auth/roles';
 import { MESSAGE_PRIVACY_OPTIONS, USER_STATUSES } from '../user.constants';
 import type { MessagePrivacy, UserStatus } from '../user.constants';
 
-export type UserDocument = HydratedDocument<User>;
+export type UserDocument = HydratedDocument<User> & { _id: Types.ObjectId };
 
 @Schema({ timestamps: true })
 export class User {

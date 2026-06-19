@@ -17,10 +17,7 @@ import {
   mapPostDocumentToFeedModel,
   mapPostDocumentsToFeedModels,
 } from './post-document.mapper';
-import type {
-  PopulatedAuthor,
-  PopulatedComment,
-} from './post-feed.types';
+import type { PopulatedAuthor, PopulatedComment } from './post-feed.types';
 
 type AuthUser = {
   id: string;
@@ -515,5 +512,4 @@ export class PostsService {
       userId,
     );
   }
-
 }

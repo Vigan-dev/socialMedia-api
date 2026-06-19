@@ -150,9 +150,9 @@ describe('UsersService relationships', () => {
   it('mutes a user after confirming the target exists', async () => {
     userModel.updateOne.mockResolvedValue({ modifiedCount: 1 });
 
-    await expect(service.muteUser(currentUserId, targetUserId)).resolves.toEqual(
-      { id: targetUserId, muted: true },
-    );
+    await expect(
+      service.muteUser(currentUserId, targetUserId),
+    ).resolves.toEqual({ id: targetUserId, muted: true });
 
     expect(userModel.updateOne).toHaveBeenCalledWith(
       { _id: currentUserId },

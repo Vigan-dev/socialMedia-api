@@ -37,7 +37,9 @@ type MessageObject = {
 
 type UnreadCounts = Map<string, number> | Record<string, number> | undefined;
 
-function isPopulatedUser(value: Types.ObjectId | PopulatedUser): value is PopulatedUser {
+function isPopulatedUser(
+  value: Types.ObjectId | PopulatedUser,
+): value is PopulatedUser {
   return !(value instanceof Types.ObjectId);
 }
 

@@ -18,6 +18,14 @@ import {
 
 const REPORT_STATUSES = ['open', 'reviewed', 'dismissed', 'actioned'];
 
+type AdminUserRecord = Pick<
+  User,
+  'email' | 'isSuspended' | 'role' | 'suspensionReason' | 'username'
+> & {
+  _id: Types.ObjectId;
+  createdAt?: Date;
+};
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -73,10 +81,11 @@ export class AdminService {
       .sort({ createdAt: -1 })
       .limit(50)
       .select('username email role isSuspended suspensionReason createdAt')
+      .lean<AdminUserRecord[]>()
       .exec();
 
     return users.map((user) => ({
-      createdAt: user.get('createdAt'),
+      createdAt: user.createdAt,
       email: user.email,
       id: user._id.toString(),
       isSuspended: Boolean(user.isSuspended),

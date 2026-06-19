@@ -36,7 +36,9 @@ type PostDocumentObject = {
   likedBy?: Types.ObjectId[];
 };
 
-function isPopulatedAuthor(value: MaybePopulatedAuthor): value is PopulatedAuthor {
+function isPopulatedAuthor(
+  value: MaybePopulatedAuthor,
+): value is PopulatedAuthor {
   return (
     Boolean(value) &&
     !(value instanceof Types.ObjectId) &&

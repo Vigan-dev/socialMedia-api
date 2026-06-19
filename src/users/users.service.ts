@@ -171,7 +171,9 @@ export class UsersService {
           this.getUserId(user) !== currentUserId &&
           !hiddenUserIds.has(this.getUserId(user)),
       )
-      .map((user) => this.userResponseMapper.toNetworkUser(user, currentUserId));
+      .map((user) =>
+        this.userResponseMapper.toNetworkUser(user, currentUserId),
+      );
   }
 
   async findFollowers(userId: string): Promise<NetworkUserResponse[]> {
@@ -191,7 +193,9 @@ export class UsersService {
 
     return followers
       .filter((follower) => !hiddenUserIds.has(this.getUserId(follower)))
-      .map((follower) => this.userResponseMapper.toNetworkUser(follower, userId));
+      .map((follower) =>
+        this.userResponseMapper.toNetworkUser(follower, userId),
+      );
   }
 
   async findFollowing(userId: string): Promise<NetworkUserResponse[]> {

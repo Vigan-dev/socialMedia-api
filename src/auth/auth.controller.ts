@@ -44,7 +44,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = request.cookies?.refresh_token;
+    const refreshToken = this.getCookie(request, 'refresh_token');
     if (!refreshToken) {
       throw new UnauthorizedException('No refresh token');
     }
@@ -76,7 +76,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = request.cookies?.refresh_token;
+    const refreshToken = this.getCookie(request, 'refresh_token');
     if (refreshToken) {
       await this.authService.logout(refreshToken);
     }
@@ -119,5 +119,15 @@ export class AuthController {
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
     });
+  }
+
+  private getCookie(request: Request, name: string): string | undefined {
+    const cookies: unknown = request.cookies;
+    if (!cookies || typeof cookies !== 'object') {
+      return undefined;
+    }
+
+    const value = (cookies as Record<string, unknown>)[name];
+    return typeof value === 'string' ? value : undefined;
   }
 }
