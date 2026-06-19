@@ -67,3 +67,7 @@ export class Post {
 }
 
 export const PostSchema = SchemaFactory.createForClass(Post);
+
+PostSchema.index({ createdAt: -1 });
+PostSchema.index({ author: 1, createdAt: -1 });
+PostSchema.index({ hiddenBy: 1 });
