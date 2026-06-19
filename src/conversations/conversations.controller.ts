@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { ConversationsService } from './conversations.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -34,6 +35,7 @@ export class ConversationsController {
   }
 
   @Post()
+  @RateLimit({ keyPrefix: 'conversations:create', limit: 20, ttlMs: 60_000 })
   findOrCreate(
     @Req() request: RequestWithUser,
     @Body() body: CreateConversationDto,
@@ -50,6 +52,7 @@ export class ConversationsController {
   }
 
   @Post(':id/messages')
+  @RateLimit({ keyPrefix: 'conversations:messages', limit: 30, ttlMs: 60_000 })
   sendMessage(
     @Req() request: RequestWithUser,
     @Param('id') id: string,

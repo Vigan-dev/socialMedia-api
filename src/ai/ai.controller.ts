@@ -11,6 +11,7 @@ import type { Request } from 'express';
 import { AiService } from './ai.service';
 import { SupportChatDto } from './dto/support-chat.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 
 type RequestWithUser = Request & {
   user?: {
@@ -26,6 +27,7 @@ export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post('support-chat')
+  @RateLimit({ keyPrefix: 'ai:support-chat', limit: 15, ttlMs: 60_000 })
   createSupportReply(
     @Body() supportChatDto: SupportChatDto,
     @Req() request: RequestWithUser,

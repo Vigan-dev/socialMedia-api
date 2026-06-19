@@ -13,17 +13,20 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @RateLimit({ keyPrefix: 'auth:register', limit: 3, ttlMs: 10 * 60_000 })
   register(@Body() body: RegisterDto) {
     return this.authService.register(body.username, body.email, body.password);
   }
 
   @Post('login')
+  @RateLimit({ keyPrefix: 'auth:login', limit: 5, ttlMs: 60_000 })
   async login(
     @Body() body: LoginDto,
     @Res({ passthrough: true }) response: Response,
@@ -58,11 +61,21 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @RateLimit({
+    keyPrefix: 'auth:forgot-password',
+    limit: 3,
+    ttlMs: 15 * 60_000,
+  })
   forgotPassword(@Body() body: ForgotPasswordDto) {
     return this.authService.requestPasswordReset(body.email);
   }
 
   @Post('reset-password')
+  @RateLimit({
+    keyPrefix: 'auth:reset-password',
+    limit: 5,
+    ttlMs: 15 * 60_000,
+  })
   resetPassword(@Body() body: ResetPasswordDto) {
     return this.authService.resetPassword(
       body.email,

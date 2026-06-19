@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -49,6 +50,7 @@ export class PostsController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'posts:create', limit: 10, ttlMs: 60_000 })
   create(
     @Body() createPostDto: CreatePostDto,
     @Req() request: RequestWithUser,
@@ -95,6 +97,7 @@ export class PostsController {
 
   @Post(':id/comments')
   @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'posts:comment', limit: 20, ttlMs: 60_000 })
   addComment(
     @Param('id') id: string,
     @Body() createCommentDto: CreateCommentDto,
@@ -119,6 +122,7 @@ export class PostsController {
 
   @Post(':postId/comments/:commentId/replies')
   @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'posts:reply', limit: 20, ttlMs: 60_000 })
   addReply(
     @Param('postId') postId: string,
     @Param('commentId') commentId: string,
