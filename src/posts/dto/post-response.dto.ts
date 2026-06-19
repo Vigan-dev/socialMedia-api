@@ -3,7 +3,6 @@ export type CommentReplyResponse = {
   id: string;
   isLiked: boolean;
   likes: number;
-  mediaUrls: string[];
   time: string;
   user: string;
 };
@@ -32,6 +31,7 @@ export type FeedPostResponse = {
   isLiked: boolean;
   isOwnPost: boolean;
   likes: number;
+  mediaUrls: string[];
   time: string;
   user: string;
 };

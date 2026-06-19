@@ -19,7 +19,6 @@ type PostReplyObject = {
   createdAt?: Date;
   hiddenBy?: Types.ObjectId[];
   likedBy?: Types.ObjectId[];
-  mediaUrls?: string[];
 };
 
 type PostCommentObject = PostReplyObject & {
@@ -35,6 +34,7 @@ type PostDocumentObject = {
   createdAt?: Date;
   hiddenBy?: Types.ObjectId[];
   likedBy?: Types.ObjectId[];
+  mediaUrls?: string[];
 };
 
 function isPopulatedAuthor(
