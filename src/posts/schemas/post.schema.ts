@@ -62,6 +62,9 @@ export class Post {
   @Prop({ default: 0 })
   commentsCount!: number;
 
+  @Prop({ type: [String], default: [] })
+  mediaUrls!: string[];
+
   @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
   hiddenBy!: Types.ObjectId[];
 }

@@ -19,6 +19,7 @@ type PostReplyObject = {
   createdAt?: Date;
   hiddenBy?: Types.ObjectId[];
   likedBy?: Types.ObjectId[];
+  mediaUrls?: string[];
 };
 
 type PostCommentObject = PostReplyObject & {
@@ -85,6 +86,7 @@ export function mapPostDocumentToFeedModel(
     createdAt: data.createdAt,
     hiddenBy: data.hiddenBy ?? [],
     likedBy: data.likedBy ?? [],
+    mediaUrls: data.mediaUrls ?? [],
   };
 }
 

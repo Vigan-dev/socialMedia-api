@@ -151,13 +151,14 @@ export class PostsService {
   }
 
   async create(
-    createPostDto: { content: string },
+    createPostDto: { content: string; mediaUrls?: string[] },
     user: AuthUser,
   ): Promise<FeedPostResponse> {
-    const content = createPostDto.content?.trim();
+    const content = createPostDto.content?.trim() ?? '';
+    const mediaUrls = this.normalizeMediaUrls(createPostDto.mediaUrls);
 
-    if (!content) {
-      throw new BadRequestException('Post content is required');
+    if (!content && mediaUrls.length === 0) {
+      throw new BadRequestException('Post content or media is required');
     }
 
     if (content.length > 500) {
@@ -169,6 +170,7 @@ export class PostsService {
     const post = await this.postModel.create({
       content,
       author: new Types.ObjectId(user.id),
+      mediaUrls,
     });
 
     const populatedPost = await post.populate([
@@ -240,17 +242,18 @@ export class PostsService {
 
   async update(
     postId: string,
-    updatePostDto: { content: string },
+    updatePostDto: { content: string; mediaUrls?: string[] },
     user: AuthUser,
   ): Promise<FeedPostResponse> {
     if (!Types.ObjectId.isValid(postId)) {
       throw new BadRequestException('Invalid post id');
     }
 
-    const content = updatePostDto.content?.trim();
+    const content = updatePostDto.content?.trim() ?? '';
+    const mediaUrls = this.normalizeMediaUrls(updatePostDto.mediaUrls);
 
-    if (!content) {
-      throw new BadRequestException('Post content is required');
+    if (!content && mediaUrls.length === 0) {
+      throw new BadRequestException('Post content or media is required');
     }
 
     if (content.length > 500) {
@@ -270,6 +273,9 @@ export class PostsService {
     }
 
     post.content = content;
+    if (updatePostDto.mediaUrls) {
+      post.mediaUrls = mediaUrls;
+    }
     await post.save();
 
     const populatedPost = await post.populate([
@@ -537,6 +543,12 @@ export class PostsService {
       (count, comment) => count + 1 + (comment.replies?.length ?? 0),
       0,
     );
+  }
+
+  private normalizeMediaUrls(mediaUrls?: string[]) {
+    return Array.from(
+      new Set((mediaUrls ?? []).map((url) => url.trim()).filter(Boolean)),
+    ).slice(0, 4);
   }
 
   private escapeRegex(value: string) {

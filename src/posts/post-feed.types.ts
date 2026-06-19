@@ -36,4 +36,5 @@ export type PostWithAuthor = {
   createdAt?: Date;
   hiddenBy?: Types.ObjectId[];
   likedBy: Types.ObjectId[];
+  mediaUrls?: string[];
 };

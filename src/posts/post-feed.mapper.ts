@@ -36,6 +36,7 @@ export class PostFeedMapper {
       content: post.content,
       time: createdAt.toISOString(),
       likes: (post.likedBy ?? []).length,
+      mediaUrls: post.mediaUrls ?? [],
       comments:
         post.commentsCount ?? this.countResponseComments(post.comments ?? []),
       commentItems: (post.comments ?? [])

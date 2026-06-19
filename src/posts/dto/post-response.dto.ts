@@ -3,6 +3,7 @@ export type CommentReplyResponse = {
   id: string;
   isLiked: boolean;
   likes: number;
+  mediaUrls: string[];
   time: string;
   user: string;
 };

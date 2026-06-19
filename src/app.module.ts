@@ -13,6 +13,7 @@ import { PostsModule } from './posts/posts.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { RateLimitGuard } from './rate-limit/rate-limit.guard';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { RateLimitGuard } from './rate-limit/rate-limit.guard';
     PostsModule,
     NotificationsModule,
     ConversationsModule,
+    UploadsModule,
   ],
   controllers: [AppController],
   providers: [
