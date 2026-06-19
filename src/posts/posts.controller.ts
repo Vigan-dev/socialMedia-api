@@ -48,6 +48,16 @@ export class PostsController {
     });
   }
 
+  @Get('by-user/:username')
+  findByAuthorUsername(@Param('username') username: string) {
+    return this.postsService.findByAuthorUsername(username);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.postsService.findById(id);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @RateLimit({ keyPrefix: 'posts:create', limit: 10, ttlMs: 60_000 })

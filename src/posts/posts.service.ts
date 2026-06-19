@@ -8,6 +8,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Post } from './schemas/post.schema';
 import type { PostDocument } from './schemas/post.schema';
+import { User } from '../users/schemas/user.schema';
+import type { UserDocument } from '../users/schemas/user.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { FeedPostResponse } from './dto/post-response.dto';
 import { RelationshipService } from '../users/relationship.service';
@@ -41,6 +43,8 @@ export class PostsService {
   constructor(
     @InjectModel(Post.name)
     private readonly postModel: Model<PostDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly notificationsService: NotificationsService,
     private readonly relationshipService: RelationshipService,
     private readonly postFeedMapper: PostFeedMapper,
@@ -109,6 +113,41 @@ export class PostsService {
       items,
       nextCursor: lastPost?.createdAt?.toISOString() ?? null,
     };
+  }
+
+  async findById(postId: string): Promise<FeedPostResponse> {
+    const post = await this.findPostOrThrow(postId);
+
+    return this.populateAndMap(post);
+  }
+
+  async findByAuthorUsername(username: string): Promise<FeedPostResponse[]> {
+    const author = await this.userModel
+      .findOne({
+        username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
+      })
+      .select('_id');
+
+    if (!author) {
+      throw new NotFoundException('User not found');
+    }
+
+    const posts = await this.postModel
+      .find({ author: author._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate<{
+        author: PopulatedAuthor;
+      }>('author', 'username email avatarUrl followers')
+      .populate<{
+        comments: PopulatedComment[];
+      }>('comments.author', 'username email')
+      .populate('comments.replies.author', 'username email')
+      .exec();
+
+    return mapPostDocumentsToFeedModels(posts).map((post) =>
+      this.postFeedMapper.toFeedPost(post),
+    );
   }
 
   async create(
@@ -500,7 +539,11 @@ export class PostsService {
     );
   }
 
-  private async populateAndMap(post: PostDocument, userId: string) {
+  private escapeRegex(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private async populateAndMap(post: PostDocument, userId?: string) {
     const populatedPost = await post.populate([
       { path: 'author', select: 'username email avatarUrl followers' },
       { path: 'comments.author', select: 'username email' },

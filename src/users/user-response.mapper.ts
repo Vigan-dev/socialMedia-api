@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type {
   NetworkUserResponse,
+  PublicUserProfileResponse,
   UserProfileResponse,
 } from './dto/user-response.dto';
 import type { UserDocument } from './schemas/user.schema';
@@ -50,6 +51,21 @@ export class UserResponseMapper {
       isFollowing: currentUserId
         ? (user.followers ?? []).some((id) => id.toString() === currentUserId)
         : false,
+    };
+  }
+
+  toPublicProfile(user: UserDocument): PublicUserProfileResponse {
+    return {
+      id: this.getUserId(user),
+      name: user.username,
+      handle: `@${user.username.toLowerCase().replace(/\s+/g, '_')}`,
+      role: user.role,
+      avatarUrl: user.avatarUrl || null,
+      bio: user.bio ?? '',
+      followersCount: (user.followers ?? []).length,
+      followingCount: (user.following ?? []).length,
+      status:
+        user.showOnlineStatus === false ? null : (user.status ?? 'available'),
     };
   }
 

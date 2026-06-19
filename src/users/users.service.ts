@@ -12,6 +12,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { RelationshipService } from './relationship.service';
 import type {
   NetworkUserResponse,
+  PublicUserProfileResponse,
   UserProfileResponse,
 } from './dto/user-response.dto';
 import { UserResponseMapper } from './user-response.mapper';
@@ -262,6 +263,20 @@ export class UsersService {
     }
 
     return this.userResponseMapper.toProfile(user);
+  }
+
+  async getPublicProfileByUsername(
+    username: string,
+  ): Promise<PublicUserProfileResponse> {
+    const user = await this.userModel.findOne({
+      username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.userResponseMapper.toPublicProfile(user);
   }
 
   async updateProfile(

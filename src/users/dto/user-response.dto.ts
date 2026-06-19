@@ -37,3 +37,15 @@ export type NetworkUserResponse = {
   role: string;
   status: UserStatus | null;
 };
+
+export type PublicUserProfileResponse = {
+  avatarUrl: string | null;
+  bio: string;
+  followersCount: number;
+  followingCount: number;
+  handle: string;
+  id: string;
+  name: string;
+  role: string;
+  status: UserStatus | null;
+};

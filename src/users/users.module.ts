@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { UsersController } from './users.controller';
+import { PublicUsersController } from './public-users.controller';
 import { UsersService } from './users.service';
 import { RelationshipService } from './relationship.service';
 import { UserResponseMapper } from './user-response.mapper';
@@ -14,7 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
     NotificationsModule,
   ],
-  controllers: [UsersController],
+  controllers: [PublicUsersController, UsersController],
   providers: [RelationshipService, UserResponseMapper, UsersService],
   exports: [RelationshipService, UsersService],
 })
