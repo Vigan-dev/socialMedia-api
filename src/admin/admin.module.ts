@@ -8,6 +8,7 @@ import { Post, PostSchema } from '../posts/schemas/post.schema';
 import { Report, ReportSchema } from '../posts/schemas/report.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { UsersModule } from '../users/users.module';
+import { AuditLog, AuditLogSchema } from './schemas/audit-log.schema';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UsersModule } from '../users/users.module';
       { name: Post.name, schema: PostSchema },
       { name: Report.name, schema: ReportSchema },
       { name: User.name, schema: UserSchema },
+      { name: AuditLog.name, schema: AuditLogSchema },
     ]),
   ],
   controllers: [AdminController, ModerationController],

@@ -15,6 +15,12 @@ import {
   mapLeanReportToAdminReport,
   type LeanAdminReport,
 } from './admin-report.mapper';
+import { AuditLog } from './schemas/audit-log.schema';
+import type {
+  AuditLogAction,
+  AuditLogDocument,
+  AuditLogTargetType,
+} from './schemas/audit-log.schema';
 
 const REPORT_STATUSES = ['open', 'reviewed', 'dismissed', 'actioned'];
 
@@ -26,6 +32,24 @@ type AdminUserRecord = Pick<
   createdAt?: Date;
 };
 
+type AuditActor = {
+  email: string;
+  id: string;
+  role: string;
+};
+
+type AuditLogRecord = {
+  _id: Types.ObjectId;
+  action: AuditLogAction;
+  actor?: Types.ObjectId;
+  actorEmail: string;
+  actorRole: string;
+  createdAt?: Date;
+  metadata?: Record<string, unknown>;
+  targetId: string;
+  targetType: AuditLogTargetType;
+};
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -35,6 +59,8 @@ export class AdminService {
     private readonly reportModel: Model<ReportDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(AuditLog.name)
+    private readonly auditLogModel: Model<AuditLogDocument>,
   ) {}
 
   getProfile() {
@@ -98,6 +124,7 @@ export class AdminService {
   async updateUserSuspension(
     id: string,
     body: { isSuspended?: boolean; reason?: string },
+    actor: AuditActor,
   ) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid user id');
@@ -115,6 +142,18 @@ export class AdminService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    await this.createAuditLog({
+      action: user.isSuspended ? 'user_suspended' : 'user_unsuspended',
+      actor,
+      targetId: user._id.toString(),
+      targetType: 'user',
+      metadata: {
+        reason: user.suspensionReason ?? '',
+        targetEmail: user.email,
+        targetUsername: user.username,
+      },
+    });
 
     return {
       email: user.email,
@@ -139,7 +178,28 @@ export class AdminService {
     return reports.map(mapLeanReportToAdminReport);
   }
 
-  async updateReport(id: string, status = '') {
+  async getAuditLogs() {
+    const logs = await this.auditLogModel
+      .find()
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean<AuditLogRecord[]>()
+      .exec();
+
+    return logs.map((log) => ({
+      id: log._id.toString(),
+      action: log.action,
+      actorEmail: log.actorEmail,
+      actorId: log.actor?.toString() ?? null,
+      actorRole: log.actorRole,
+      createdAt: (log.createdAt ?? new Date()).toISOString(),
+      metadata: log.metadata ?? {},
+      targetId: log.targetId,
+      targetType: log.targetType,
+    }));
+  }
+
+  async updateReport(id: string, status = '', actor: AuditActor) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid report id');
     }
@@ -158,10 +218,23 @@ export class AdminService {
       throw new NotFoundException('Report not found');
     }
 
+    await this.createAuditLog({
+      action: this.getReportAuditAction(report.status),
+      actor,
+      targetId: report._id.toString(),
+      targetType: 'report',
+      metadata: {
+        reason: report.reason,
+        status: report.status,
+        targetId: report.targetId,
+        targetType: report.targetType,
+      },
+    });
+
     return { id: report._id.toString(), status: report.status };
   }
 
-  async deletePost(id: string) {
+  async deletePost(id: string, actor: AuditActor) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid post id');
     }
@@ -171,15 +244,25 @@ export class AdminService {
       throw new NotFoundException('Post not found');
     }
 
-    await this.reportModel.updateMany(
+    const reportUpdate = await this.reportModel.updateMany(
       { targetId: id, targetType: 'post' },
       { status: 'actioned' },
     );
 
+    await this.createAuditLog({
+      action: 'post_deleted',
+      actor,
+      targetId: id,
+      targetType: 'post',
+      metadata: {
+        actionedReports: reportUpdate.modifiedCount,
+      },
+    });
+
     return { deletedPostId: id, success: true };
   }
 
-  async deleteComment(id: string) {
+  async deleteComment(id: string, actor: AuditActor) {
     const post = await this.postModel.findOne({ 'comments._id': id });
     if (!post) {
       throw new NotFoundException('Comment not found');
@@ -191,10 +274,20 @@ export class AdminService {
     post.commentsCount = this.countComments(post.comments ?? []);
     await post.save();
 
-    await this.reportModel.updateMany(
+    const reportUpdate = await this.reportModel.updateMany(
       { targetId: id, targetType: 'comment' },
       { status: 'actioned' },
     );
+
+    await this.createAuditLog({
+      action: 'comment_deleted',
+      actor,
+      targetId: id,
+      targetType: 'comment',
+      metadata: {
+        actionedReports: reportUpdate.modifiedCount,
+      },
+    });
 
     return { deletedCommentId: id, success: true };
   }
@@ -204,5 +297,30 @@ export class AdminService {
       (count, comment) => count + 1 + (comment.replies?.length ?? 0),
       0,
     );
+  }
+
+  private getReportAuditAction(status: string): AuditLogAction {
+    if (status === 'actioned') return 'report_actioned';
+    if (status === 'dismissed') return 'report_dismissed';
+    if (status === 'reviewed') return 'report_reviewed';
+    return 'report_reopened';
+  }
+
+  private async createAuditLog(input: {
+    action: AuditLogAction;
+    actor: AuditActor;
+    metadata?: Record<string, unknown>;
+    targetId: string;
+    targetType: AuditLogTargetType;
+  }) {
+    await this.auditLogModel.create({
+      action: input.action,
+      actor: new Types.ObjectId(input.actor.id),
+      actorEmail: input.actor.email,
+      actorRole: input.actor.role,
+      metadata: input.metadata ?? {},
+      targetId: input.targetId,
+      targetType: input.targetType,
+    });
   }
 }
