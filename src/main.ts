@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
+import { createSameOriginWriteMiddleware } from './security/same-origin-write.middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,6 +14,7 @@ async function bootstrap() {
     .split(',');
 
   app.use(cookieParser());
+  app.use(createSameOriginWriteMiddleware(clientOrigins));
   app.useGlobalPipes(
     new ValidationPipe({
       forbidNonWhitelisted: true,
