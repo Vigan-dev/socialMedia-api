@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Post } from './schemas/post.schema';
@@ -20,6 +21,7 @@ import {
   mapPostDocumentsToFeedModels,
 } from './post-document.mapper';
 import type { PopulatedAuthor, PopulatedComment } from './post-feed.types';
+import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 
 type AuthUser = {
   id: string;
@@ -49,6 +51,7 @@ export class PostsService {
     private readonly relationshipService: RelationshipService,
     private readonly postFeedMapper: PostFeedMapper,
     private readonly postReportsService: PostReportsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async findAll(
@@ -546,9 +549,26 @@ export class PostsService {
   }
 
   private normalizeMediaUrls(mediaUrls?: string[]) {
-    return Array.from(
+    const publicApiUrl = this.configService.get<string>('PUBLIC_API_URL');
+    const normalizedUrls = Array.from(
       new Set((mediaUrls ?? []).map((url) => url.trim()).filter(Boolean)),
     ).slice(0, 4);
+
+    for (const url of normalizedUrls) {
+      if (
+        !isTrustedUploadUrl({
+          directory: 'post-media',
+          publicApiUrl,
+          url,
+        })
+      ) {
+        throw new BadRequestException(
+          'Post media must reference an uploaded post image',
+        );
+      }
+    }
+
+    return normalizedUrls;
   }
 
   private escapeRegex(value: string) {

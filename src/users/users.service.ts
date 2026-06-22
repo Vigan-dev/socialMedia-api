@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 
@@ -17,8 +18,9 @@ import type {
 } from './dto/user-response.dto';
 import { UserResponseMapper } from './user-response.mapper';
 import type { MessagePrivacy, UserStatus } from './user.constants';
+import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 
-const MAX_AVATAR_DATA_URL_LENGTH = 2_000_000;
+const MAX_AVATAR_URL_LENGTH = 2048;
 
 @Injectable()
 export class UsersService {
@@ -28,6 +30,7 @@ export class UsersService {
     private readonly notificationsService: NotificationsService,
     private readonly relationshipService: RelationshipService,
     private readonly userResponseMapper: UserResponseMapper,
+    private readonly configService: ConfigService,
   ) {}
 
   async findByEmail(email: string) {
@@ -567,17 +570,24 @@ export class UsersService {
   }
 
   private assertValidAvatarUrl(avatarUrl: string) {
-    if (
-      avatarUrl &&
-      !avatarUrl.startsWith('data:image/') &&
-      !avatarUrl.startsWith('http://') &&
-      !avatarUrl.startsWith('https://')
-    ) {
-      throw new BadRequestException('Avatar must be an image data URL or URL');
+    if (!avatarUrl) {
+      return;
     }
 
-    if (avatarUrl.length > MAX_AVATAR_DATA_URL_LENGTH) {
-      throw new BadRequestException('Avatar image is too large');
+    if (avatarUrl.length > MAX_AVATAR_URL_LENGTH) {
+      throw new BadRequestException('Avatar image URL is too large');
+    }
+
+    if (
+      !isTrustedUploadUrl({
+        directory: 'avatars',
+        publicApiUrl: this.configService.get<string>('PUBLIC_API_URL'),
+        url: avatarUrl,
+      })
+    ) {
+      throw new BadRequestException(
+        'Avatar must reference an uploaded avatar image',
+      );
     }
   }
 

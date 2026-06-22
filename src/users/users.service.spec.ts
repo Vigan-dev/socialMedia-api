@@ -43,6 +43,7 @@ describe('UsersService relationships', () => {
       notificationsService as never,
       relationshipService as never,
       new UserResponseMapper(),
+      { get: jest.fn(() => 'http://localhost:3000') } as never,
     );
 
     relationshipService.assertRelationshipTarget.mockResolvedValue({

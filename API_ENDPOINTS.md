@@ -37,8 +37,8 @@ All user endpoints require authentication.
 | `GET` | `/users/me/following` | Get users followed by the current user. |
 | `GET` | `/users/suggestions` | Get suggested users. |
 | `GET` | `/users/username-availability?username=value` | Check username availability. |
-| `PATCH` | `/users/me` | Update profile fields such as username, bio, and avatar URL. |
-| `PATCH` | `/users/avatar` | Update avatar URL. |
+| `PATCH` | `/users/me` | Update profile fields such as username, bio, and uploaded avatar URL. |
+| `PATCH` | `/users/avatar` | Update uploaded avatar URL. |
 | `PATCH` | `/users/status` | Update user status. |
 | `PATCH` | `/users/privacy` | Update message, mention, and online-status privacy settings. |
 | `PATCH` | `/users/notification-settings` | Update notification preferences. |

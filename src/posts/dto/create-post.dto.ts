@@ -6,8 +6,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-
-const mediaUrlPattern = /^https?:\/\/.+/;
+import { postMediaUploadUrlPattern } from '../../uploads/upload-url.validation';
 
 export class CreatePostDto {
   @IsString()
@@ -19,9 +18,9 @@ export class CreatePostDto {
   @ArrayMaxSize(4)
   @IsString({ each: true })
   @MaxLength(2048, { each: true })
-  @Matches(mediaUrlPattern, {
+  @Matches(postMediaUploadUrlPattern, {
     each: true,
-    message: 'mediaUrls must contain HTTP(S) URLs',
+    message: 'mediaUrls must reference uploaded post media',
   })
   mediaUrls?: string[];
 }

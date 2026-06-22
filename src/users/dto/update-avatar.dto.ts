@@ -5,16 +5,15 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-
-const avatarUrlPattern = /^(data:image\/|https?:\/\/)/;
+import { avatarUploadUrlPattern } from '../../uploads/upload-url.validation';
 
 export class UpdateAvatarDto {
   @IsOptional()
   @ValidateIf((_, value) => value !== null && value !== '')
   @IsString()
-  @MaxLength(2_000_000)
-  @Matches(avatarUrlPattern, {
-    message: 'avatarUrl must be an image data URL or HTTP(S) URL',
+  @MaxLength(2048)
+  @Matches(avatarUploadUrlPattern, {
+    message: 'avatarUrl must reference an uploaded avatar image',
   })
   avatarUrl?: string | null;
 }
