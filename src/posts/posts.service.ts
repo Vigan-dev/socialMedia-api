@@ -40,6 +40,8 @@ type FeedPageResponse = {
   nextCursor: string | null;
 };
 
+const recentTrendingWindowMultiplier = 3;
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -63,7 +65,10 @@ export class PostsService {
       : null;
     const hiddenAuthorIds = visibility?.hiddenUserIds ?? new Set<string>();
     const feed = query.feed === 'following' ? 'following' : 'all';
-    const sort = query.sort === 'top' ? 'top' : 'latest';
+    const sort =
+      query.sort === 'trending' || query.sort === 'top'
+        ? 'trending'
+        : 'latest';
     const limit = Math.min(Math.max(Number(query.limit) || 12, 1), 30);
     const cursorDate = query.cursor ? new Date(query.cursor) : null;
     const postQuery: Record<string, unknown> = userId
@@ -81,7 +86,7 @@ export class PostsService {
     const posts = await this.postModel
       .find(postQuery)
       .sort({ createdAt: -1 })
-      .limit(limit * 3)
+      .limit(limit * recentTrendingWindowMultiplier)
       .populate<{
         author: PopulatedAuthor;
       }>('author', 'username email avatarUrl followers')
@@ -96,7 +101,7 @@ export class PostsService {
       return !authorId || !hiddenAuthorIds.has(authorId);
     });
     const sortedPosts =
-      sort === 'top'
+      sort === 'trending'
         ? filteredPosts.sort(
             (a, b) =>
               this.postFeedMapper.scorePost(b) -
