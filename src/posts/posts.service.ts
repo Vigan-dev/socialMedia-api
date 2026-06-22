@@ -70,7 +70,10 @@ export class PostsService {
         ? 'trending'
         : 'latest';
     const limit = Math.min(Math.max(Number(query.limit) || 12, 1), 30);
-    const cursorDate = query.cursor ? new Date(query.cursor) : null;
+    const cursorDate =
+      sort === 'latest' && query.cursor ? new Date(query.cursor) : null;
+    const queryLimit =
+      sort === 'trending' ? limit * recentTrendingWindowMultiplier : limit + 1;
     const postQuery: Record<string, unknown> = userId
       ? { hiddenBy: { $ne: new Types.ObjectId(userId) } }
       : {};
@@ -86,7 +89,7 @@ export class PostsService {
     const posts = await this.postModel
       .find(postQuery)
       .sort({ createdAt: -1 })
-      .limit(limit * recentTrendingWindowMultiplier)
+      .limit(queryLimit)
       .populate<{
         author: PopulatedAuthor;
       }>('author', 'username email avatarUrl followers')
@@ -114,10 +117,11 @@ export class PostsService {
       .map((post) =>
         this.postFeedMapper.toFeedPost(post, userId, hiddenAuthorIds),
       );
-    const lastPost = sortedPosts[Math.min(limit, sortedPosts.length) - 1];
+    const hasMore = sort === 'latest' && sortedPosts.length > limit;
+    const lastPost = hasMore ? sortedPosts[limit - 1] : null;
 
     return {
-      hasMore: sortedPosts.length > limit,
+      hasMore,
       items,
       nextCursor: lastPost?.createdAt?.toISOString() ?? null,
     };

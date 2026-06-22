@@ -54,7 +54,7 @@ All post endpoints require authentication.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/posts?feed=all&sort=latest&limit=12&cursor=...` | Get the feed with cursor pagination. `feed` can be `all` or `following`; `sort` can be `latest` or `trending`. `trending` ranks a recent candidate window by engagement. |
+| `GET` | `/posts?feed=all&sort=latest&limit=12&cursor=...` | Get the feed. `feed` can be `all` or `following`; `sort` can be `latest` or `trending`. `latest` uses cursor pagination. `trending` ranks a recent candidate window by engagement and does not paginate. |
 | `POST` | `/posts` | Create a post. |
 | `POST` | `/posts/:id/like` | Toggle post like. |
 | `PATCH` | `/posts/:id` | Edit your own post. |
