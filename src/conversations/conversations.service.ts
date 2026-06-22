@@ -9,7 +9,10 @@ import { Model, Types } from 'mongoose';
 import { NotificationsService } from '../notifications/notifications.service';
 import { User } from '../users/schemas/user.schema';
 import type { UserDocument } from '../users/schemas/user.schema';
-import { Conversation } from './schemas/conversation.schema';
+import {
+  Conversation,
+  createConversationKey,
+} from './schemas/conversation.schema';
 import type { ConversationDocument } from './schemas/conversation.schema';
 import { Message } from './schemas/message.schema';
 import type { MessageDocument } from './schemas/message.schema';
@@ -23,6 +26,15 @@ import {
 } from './conversation-response.mapper';
 
 const TYPING_TTL_MS = 6000;
+
+function isDuplicateKeyError(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 11000
+  );
+}
 
 @Injectable()
 export class ConversationsService {
@@ -90,16 +102,41 @@ export class ConversationsService {
       new Types.ObjectId(userId),
       new Types.ObjectId(participantId),
     ];
+    const conversationKey = createConversationKey(participantIds);
 
-    let conversation = await this.conversationModel.findOne({
-      participants: { $all: participantIds, $size: 2 },
-    });
+    let conversation: ConversationDocument | null;
+
+    try {
+      conversation = await this.conversationModel.findOneAndUpdate(
+        {
+          $or: [
+            { conversationKey },
+            { participants: { $all: participantIds, $size: 2 } },
+          ],
+        },
+        {
+          $set: { conversationKey },
+          $setOnInsert: {
+            participants: participantIds,
+            unreadCounts: new Map(),
+          },
+        },
+        {
+          new: true,
+          setDefaultsOnInsert: true,
+          upsert: true,
+        },
+      );
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+
+      conversation = await this.conversationModel.findOne({ conversationKey });
+    }
 
     if (!conversation) {
-      conversation = await this.conversationModel.create({
-        participants: participantIds,
-        unreadCounts: new Map(),
-      });
+      throw new NotFoundException('Conversation not found');
     }
 
     const populated = await conversation.populate([
