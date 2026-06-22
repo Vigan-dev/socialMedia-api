@@ -3,10 +3,10 @@ import {
   Injectable,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Request } from 'express';
 
 type UploadPurpose = 'avatar' | 'post-media';
 
@@ -31,10 +31,11 @@ const maxBytesByPurpose: Record<UploadPurpose, number> = {
 
 @Injectable()
 export class UploadsService {
+  constructor(private readonly configService: ConfigService) {}
+
   async saveImage(input: {
     dataUrl: string;
     purpose: UploadPurpose;
-    request: Request;
   }) {
     const { buffer, mimeType } = this.parseImageDataUrl(input.dataUrl);
     const maxBytes = maxBytesByPurpose[input.purpose];
@@ -64,7 +65,7 @@ export class UploadsService {
     }
 
     return {
-      url: `${this.getRequestOrigin(input.request)}${relativePath}`,
+      url: this.buildPublicUploadUrl(relativePath),
     };
   }
 
@@ -112,21 +113,12 @@ export class UploadsService {
     }
   }
 
-  private getRequestOrigin(request: Request) {
-    const host =
-      this.getFirstHeaderPart(request, 'x-forwarded-host') ??
-      this.getFirstHeaderPart(request, 'host') ??
-      request.hostname;
-    const protocol =
-      this.getFirstHeaderPart(request, 'x-forwarded-proto') ?? request.protocol;
+  private buildPublicUploadUrl(relativePath: string) {
+    const publicApiUrl = this.configService.get<string>('PUBLIC_API_URL');
+    if (!publicApiUrl) {
+      return relativePath;
+    }
 
-    return `${protocol}://${host}`;
-  }
-
-  private getFirstHeaderPart(request: Request, name: string) {
-    const value = request.headers[name];
-    const header = Array.isArray(value) ? value[0] : value;
-
-    return header?.split(',')[0]?.trim();
+    return `${publicApiUrl.replace(/\/$/, '')}${relativePath}`;
   }
 }

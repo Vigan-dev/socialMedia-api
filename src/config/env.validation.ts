@@ -36,6 +36,28 @@ function parseClientOrigins(value: string) {
   return [...new Set(origins)];
 }
 
+function parsePublicApiUrl(value: string) {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('PUBLIC_API_URL must be a valid URL');
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('PUBLIC_API_URL must use http or https');
+  }
+
+  if (url.pathname !== '/' || url.search || url.hash) {
+    throw new Error(
+      'PUBLIC_API_URL must be an origin without a path, query string, or fragment',
+    );
+  }
+
+  return url.origin;
+}
+
 export function validateEnvironment(config: Environment) {
   const mongodbUri = config.MONGODB_URI;
   const jwtSecret = config.JWT_SECRET?.trim();
@@ -81,6 +103,10 @@ export function validateEnvironment(config: Environment) {
 
   config.OLLAMA_HOST ??= 'http://localhost:11434';
   config.OLLAMA_MODEL ??= 'llama3.2:3b';
+
+  if (config.PUBLIC_API_URL) {
+    config.PUBLIC_API_URL = parsePublicApiUrl(config.PUBLIC_API_URL.trim());
+  }
 
   if (config.ADMIN_EMAIL || config.ADMIN_PASSWORD || config.ADMIN_USERNAME) {
     if (!config.ADMIN_EMAIL?.trim()) {

@@ -69,6 +69,7 @@ Recommended local values:
 ```env
 MONGODB_URI=mongodb://localhost:27017/socialmedia
 CLIENT_ORIGINS=http://localhost:3001
+PUBLIC_API_URL=http://localhost:3000
 JWT_SECRET=replace-with-a-long-random-secret-at-least-32-chars
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
@@ -152,6 +153,10 @@ CLIENT_ORIGINS=http://localhost:3001,https://preview.example.com,https://app.exa
 ```
 
 `CLIENT_ORIGIN` is still accepted for older local `.env` files.
+
+Set `PUBLIC_API_URL` to the public origin where this API is reachable. Uploaded
+image responses are built from this trusted value. If it is omitted, upload
+responses use relative `/uploads/...` paths.
 
 ## GitHub Push
 

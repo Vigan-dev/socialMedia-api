@@ -1,5 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import type { Request } from 'express';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { UploadImageDto } from './dto/upload-image.dto';
@@ -12,11 +11,10 @@ export class UploadsController {
 
   @Post('images')
   @RateLimit({ keyPrefix: 'uploads:images', limit: 20, ttlMs: 60_000 })
-  uploadImage(@Body() body: UploadImageDto, @Req() request: Request) {
+  uploadImage(@Body() body: UploadImageDto) {
     return this.uploadsService.saveImage({
       dataUrl: body.dataUrl,
       purpose: body.purpose,
-      request,
     });
   }
 }

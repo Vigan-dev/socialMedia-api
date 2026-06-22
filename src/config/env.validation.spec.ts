@@ -53,4 +53,22 @@ describe('validateEnvironment', () => {
       }),
     ).toThrow('CLIENT_ORIGINS must only contain http or https URLs');
   });
+
+  it('normalizes public API URL when configured', () => {
+    const config = validateEnvironment({
+      ...validBaseEnv,
+      PUBLIC_API_URL: 'https://api.example.com/',
+    });
+
+    expect(config.PUBLIC_API_URL).toBe('https://api.example.com');
+  });
+
+  it('rejects public API URL with paths', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validBaseEnv,
+        PUBLIC_API_URL: 'https://api.example.com/uploads',
+      }),
+    ).toThrow('PUBLIC_API_URL must be an origin');
+  });
 });
