@@ -254,24 +254,11 @@ export class PostsService {
 
   async update(
     postId: string,
-    updatePostDto: { content: string; mediaUrls?: string[] },
+    updatePostDto: { content?: string; mediaUrls?: string[] },
     user: AuthUser,
   ): Promise<FeedPostResponse> {
     if (!Types.ObjectId.isValid(postId)) {
       throw new BadRequestException('Invalid post id');
-    }
-
-    const content = updatePostDto.content?.trim() ?? '';
-    const mediaUrls = this.normalizeMediaUrls(updatePostDto.mediaUrls);
-
-    if (!content && mediaUrls.length === 0) {
-      throw new BadRequestException('Post content or media is required');
-    }
-
-    if (content.length > 500) {
-      throw new BadRequestException(
-        'Post content must be 500 characters or less',
-      );
     }
 
     const post = await this.postModel.findById(postId);
@@ -284,9 +271,35 @@ export class PostsService {
       throw new ForbiddenException('You can only edit your own posts');
     }
 
-    post.content = content;
-    if (updatePostDto.mediaUrls) {
-      post.mediaUrls = mediaUrls;
+    const hasContentUpdate = updatePostDto.content !== undefined;
+    const hasMediaUpdate = updatePostDto.mediaUrls !== undefined;
+
+    if (!hasContentUpdate && !hasMediaUpdate) {
+      throw new BadRequestException('Post content or media is required');
+    }
+
+    const nextContent = hasContentUpdate
+      ? updatePostDto.content?.trim() ?? ''
+      : post.content;
+    const nextMediaUrls = hasMediaUpdate
+      ? this.normalizeMediaUrls(updatePostDto.mediaUrls)
+      : post.mediaUrls ?? [];
+
+    if (!nextContent && nextMediaUrls.length === 0) {
+      throw new BadRequestException('Post content or media is required');
+    }
+
+    if (nextContent.length > 500) {
+      throw new BadRequestException(
+        'Post content must be 500 characters or less',
+      );
+    }
+
+    if (hasContentUpdate) {
+      post.content = nextContent;
+    }
+    if (hasMediaUpdate) {
+      post.mediaUrls = nextMediaUrls;
     }
     await post.save();
 

@@ -1,19 +1,20 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsOptional,
   IsString,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { postMediaUploadUrlPattern } from '../../uploads/upload-url.validation';
 
 export class UpdatePostDto {
+  @ValidateIf((_, value) => value !== undefined)
   @IsString()
   @MaxLength(500)
-  content!: string;
+  content?: string;
 
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsArray()
   @ArrayMaxSize(4)
   @IsString({ each: true })
