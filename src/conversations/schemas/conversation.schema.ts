@@ -44,12 +44,10 @@ export class Conversation {
 
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
 
-ConversationSchema.pre('validate', function setConversationKey(next) {
+ConversationSchema.pre('validate', function setConversationKey() {
   if (!this.conversationKey && this.participants?.length) {
     this.conversationKey = createConversationKey(this.participants);
   }
-
-  next();
 });
 
 ConversationSchema.index(

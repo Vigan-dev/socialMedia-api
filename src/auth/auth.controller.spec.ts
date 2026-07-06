@@ -20,6 +20,7 @@ describe('AuthController', () => {
     clearCookie: jest.Mock;
     cookie: jest.Mock;
   };
+  let request: Request;
 
   const session = {
     accessToken: 'access-token',
@@ -43,6 +44,13 @@ describe('AuthController', () => {
       clearCookie: jest.fn(),
       cookie: jest.fn(),
     };
+    request = {
+      headers: { 'user-agent': 'jest' },
+      ip: '127.0.0.1',
+      socket: { remoteAddress: '127.0.0.1' },
+    } as unknown as Request;
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
@@ -57,12 +65,17 @@ describe('AuthController', () => {
     controller = module.get<AuthController>(AuthController);
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('sets access and refresh cookies on login', async () => {
     authService.login.mockResolvedValue(session);
 
     await expect(
       controller.login(
         { email: 'test@example.com', password: 'Password1', rememberMe: false },
+        request,
         response as Response,
       ),
     ).resolves.toEqual({ ok: true });
@@ -90,6 +103,29 @@ describe('AuthController', () => {
         sameSite: 'lax',
       }),
     );
+  });
+
+  it('logs failed login attempts without setting cookies', async () => {
+    const error = new UnauthorizedException('Invalid email or password');
+    authService.login.mockRejectedValue(error);
+
+    await expect(
+      controller.login(
+        { email: 'test@example.com', password: 'WrongPassword1' },
+        request,
+        response as Response,
+      ),
+    ).rejects.toBe(error);
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[auth] Failed login attempt',
+      expect.objectContaining({
+        email: 'te***@example.com',
+        ip: '127.0.0.1',
+        userAgent: 'jest',
+      }),
+    );
+    expect(response.cookie).not.toHaveBeenCalled();
   });
 
   it('refreshes a session from the refresh cookie and returns the user', async () => {

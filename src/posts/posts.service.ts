@@ -21,7 +21,11 @@ import {
   mapPostDocumentToFeedModel,
   mapPostDocumentsToFeedModels,
 } from './post-document.mapper';
-import type { PopulatedAuthor, PopulatedComment } from './post-feed.types';
+import type {
+  PopulatedAuthor,
+  PopulatedComment,
+  PostWithAuthor,
+} from './post-feed.types';
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 
 type AuthUser = {
@@ -140,9 +144,14 @@ export class PostsService {
     postId: string,
     viewerId?: string,
   ): Promise<PublicPostResponse> {
-    const post = await this.findPublicPostOrThrow(postId, viewerId);
+    const visibility = await this.getPublicViewerContext(viewerId);
+    const post = await this.findPublicPostOrThrow(postId, visibility);
 
-    return this.populateAndMapPublic(post, viewerId);
+    return this.postFeedMapper.toPublicPost(
+      post,
+      viewerId,
+      visibility.hiddenAuthorIds,
+    );
   }
 
   async findByAuthorUsername(
@@ -570,12 +579,14 @@ export class PostsService {
     return post;
   }
 
-  private async findPublicPostOrThrow(postId: string, viewerId?: string) {
+  private async findPublicPostOrThrow(
+    postId: string,
+    visibility: PublicViewerContext,
+  ): Promise<PostWithAuthor> {
     if (!Types.ObjectId.isValid(postId)) {
       throw new BadRequestException('Invalid post id');
     }
 
-    const visibility = await this.getPublicViewerContext(viewerId);
     const post = await this.postModel
       .findOne({
         _id: new Types.ObjectId(postId),
@@ -584,7 +595,15 @@ export class PostsService {
       .populate<{ author: PopulatedAuthor }>(
         'author',
         'username email avatarUrl followers isSuspended profileVisibility',
-      );
+      )
+      .populate<{
+        comments: PopulatedComment[];
+      }>('comments.author', 'username email isSuspended profileVisibility')
+      .populate(
+        'comments.replies.author',
+        'username email isSuspended profileVisibility',
+      )
+      .exec();
 
     if (!post) {
       throw new NotFoundException('Post not found');
@@ -602,7 +621,7 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    return post;
+    return feedPost;
   }
 
   private findCommentOrThrow(post: PostDocument, commentId: string) {
@@ -676,30 +695,6 @@ export class PostsService {
     return this.postFeedMapper.toFeedPost(
       mapPostDocumentToFeedModel(populatedPost),
       userId,
-    );
-  }
-
-  private async populateAndMapPublic(post: PostDocument, userId?: string) {
-    const visibility = await this.getPublicViewerContext(userId);
-    const populatedPost = await post.populate([
-      {
-        path: 'author',
-        select: 'username email avatarUrl followers isSuspended profileVisibility',
-      },
-      {
-        path: 'comments.author',
-        select: 'username email isSuspended profileVisibility',
-      },
-      {
-        path: 'comments.replies.author',
-        select: 'username email isSuspended profileVisibility',
-      },
-    ]);
-
-    return this.postFeedMapper.toPublicPost(
-      mapPostDocumentToFeedModel(populatedPost),
-      userId,
-      visibility.hiddenAuthorIds,
     );
   }
 

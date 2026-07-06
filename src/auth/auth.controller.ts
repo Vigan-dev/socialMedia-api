@@ -26,20 +26,34 @@ export class AuthController {
   }
 
   @Post('login')
-  @RateLimit({ keyPrefix: 'auth:login', limit: 5, ttlMs: 60_000 })
+  @RateLimit({
+    bodyField: 'email',
+    keyPrefix: 'auth:login:account',
+    limit: 5,
+    secondaryLimits: [
+      { keyPrefix: 'auth:login:ip', limit: 20, ttlMs: 60_000 },
+    ],
+    ttlMs: 60_000,
+  })
   async login(
     @Body() body: LoginDto,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const session = await this.authService.login(
-      body.email,
-      body.password,
-      body.rememberMe,
-    );
+    try {
+      const session = await this.authService.login(
+        body.email,
+        body.password,
+        body.rememberMe,
+      );
+      this.logLoginAttempt(request, body.email, true);
+      this.setSessionCookies(response, session);
 
-    this.setSessionCookies(response, session);
-
-    return { ok: true };
+      return { ok: true };
+    } catch (error) {
+      this.logLoginAttempt(request, body.email, false);
+      throw error;
+    }
   }
 
   @Post('refresh')
@@ -142,5 +156,42 @@ export class AuthController {
 
     const value = (cookies as Record<string, unknown>)[name];
     return typeof value === 'string' ? value : undefined;
+  }
+
+  private logLoginAttempt(request: Request, email: string, success: boolean) {
+    const metadata = {
+      email: this.redactEmail(email),
+      ip: this.getClientIp(request),
+      userAgent: request.headers['user-agent'] ?? 'unknown',
+    };
+
+    if (success) {
+      console.info('[auth] Successful login', metadata);
+      return;
+    }
+
+    console.warn('[auth] Failed login attempt', metadata);
+  }
+
+  private getClientIp(request: Request) {
+    const forwardedFor = request.headers['x-forwarded-for'];
+    const firstForwardedIp = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor?.split(',')[0];
+
+    return (
+      firstForwardedIp?.trim() ||
+      request.ip ||
+      request.socket.remoteAddress ||
+      'unknown'
+    );
+  }
+
+  private redactEmail(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const [name = '', domain = 'unknown'] = normalizedEmail.split('@');
+    const visiblePrefix = name.slice(0, 2);
+
+    return `${visiblePrefix || '**'}***@${domain}`;
   }
 }
