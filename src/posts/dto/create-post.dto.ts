@@ -5,13 +5,15 @@ import {
   IsString,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { postMediaUploadUrlPattern } from '../../uploads/upload-url.validation';
 
 export class CreatePostDto {
+  @ValidateIf((_, value) => value !== undefined)
   @IsString()
   @MaxLength(500)
-  content!: string;
+  content?: string;
 
   @IsOptional()
   @IsArray()

@@ -17,6 +17,18 @@ export type CommentResponse = {
   user: string;
 };
 
+export type PublicCommentReplyResponse = Omit<
+  CommentReplyResponse,
+  'isLiked'
+>;
+
+export type PublicCommentResponse = Omit<
+  CommentResponse,
+  'isLiked' | 'replies'
+> & {
+  replies: PublicCommentReplyResponse[];
+};
+
 export type FeedPostResponse = {
   authorId?: string;
   avatarBg: string;
@@ -34,4 +46,11 @@ export type FeedPostResponse = {
   mediaUrls: string[];
   time: string;
   user: string;
+};
+
+export type PublicPostResponse = Omit<
+  FeedPostResponse,
+  'authorId' | 'commentItems' | 'isFollowing' | 'isLiked' | 'isOwnPost'
+> & {
+  commentItems: PublicCommentResponse[];
 };

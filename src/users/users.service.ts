@@ -270,12 +270,18 @@ export class UsersService {
 
   async getPublicProfileByUsername(
     username: string,
+    viewerId?: string,
   ): Promise<PublicUserProfileResponse> {
+    const hiddenUserIds = viewerId
+      ? await this.relationshipService.getHiddenUserIds(viewerId)
+      : new Set<string>();
     const user = await this.userModel.findOne({
+      isSuspended: false,
+      profileVisibility: { $ne: 'private' },
       username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
     });
 
-    if (!user) {
+    if (!user || hiddenUserIds.has(this.getUserId(user))) {
       throw new NotFoundException('User not found');
     }
 

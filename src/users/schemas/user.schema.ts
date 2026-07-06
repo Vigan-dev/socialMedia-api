@@ -1,8 +1,16 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { userRoles, type UserRole } from '../../auth/roles';
-import { MESSAGE_PRIVACY_OPTIONS, USER_STATUSES } from '../user.constants';
-import type { MessagePrivacy, UserStatus } from '../user.constants';
+import {
+  MESSAGE_PRIVACY_OPTIONS,
+  PROFILE_VISIBILITY_OPTIONS,
+  USER_STATUSES,
+} from '../user.constants';
+import type {
+  MessagePrivacy,
+  ProfileVisibility,
+  UserStatus,
+} from '../user.constants';
 
 export type UserDocument = HydratedDocument<User> & { _id: Types.ObjectId };
 
@@ -46,6 +54,14 @@ export class User {
 
   @Prop({ default: true })
   showOnlineStatus!: boolean;
+
+  @Prop({
+    type: String,
+    enum: PROFILE_VISIBILITY_OPTIONS,
+    default: 'public',
+    index: true,
+  })
+  profileVisibility!: ProfileVisibility;
 
   @Prop({
     type: {

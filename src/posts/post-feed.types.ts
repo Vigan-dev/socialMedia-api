@@ -6,6 +6,8 @@ export type PopulatedAuthor = {
   email: string;
   avatarUrl?: string;
   followers?: Types.ObjectId[];
+  isSuspended?: boolean;
+  profileVisibility?: 'public' | 'private';
 };
 
 export type PopulatedReply = {
@@ -37,4 +39,6 @@ export type PostWithAuthor = {
   hiddenBy?: Types.ObjectId[];
   likedBy: Types.ObjectId[];
   mediaUrls?: string[];
+  isArchived?: boolean;
+  isHidden?: boolean;
 };

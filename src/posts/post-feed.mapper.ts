@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Types } from 'mongoose';
 
-import type { FeedPostResponse } from './dto/post-response.dto';
+import type {
+  FeedPostResponse,
+  PublicPostResponse,
+} from './dto/post-response.dto';
 import type {
   PopulatedAuthor,
   PopulatedComment,
@@ -87,6 +90,43 @@ export class PostFeedMapper {
     };
   }
 
+  toPublicPost(
+    post: PostWithAuthor,
+    currentUserId?: string,
+    hiddenAuthorIds = new Set<string>(),
+  ): PublicPostResponse {
+    const {
+      authorId: _authorId,
+      isFollowing: _isFollowing,
+      isLiked: _isLiked,
+      isOwnPost: _isOwnPost,
+      ...publicPost
+    } = this.toFeedPost(post, currentUserId, hiddenAuthorIds);
+
+    const commentItems = publicPost.commentItems.map((comment) => {
+      const {
+        isLiked: _commentIsLiked,
+        replies,
+        ...publicComment
+      } = comment;
+
+      return {
+        ...publicComment,
+        replies: replies.map((reply) => {
+          const { isLiked: _replyIsLiked, ...publicReply } = reply;
+          return publicReply;
+        }),
+      };
+    });
+    const comments = this.countPublicComments(commentItems);
+
+    return {
+      ...publicPost,
+      commentItems,
+      comments,
+    };
+  }
+
   scorePost(post: PostWithAuthor) {
     return (post.likedBy ?? []).length * 2 + (post.commentsCount ?? 0);
   }
@@ -98,20 +138,35 @@ export class PostFeedMapper {
     );
   }
 
+  private countPublicComments(comments: PublicPostResponse['commentItems']) {
+    return comments.reduce(
+      (count, comment) => count + 1 + comment.replies.length,
+      0,
+    );
+  }
+
   private isVisibleToViewer({
     author,
     currentUserId,
     hiddenAuthorIds,
     hiddenBy,
   }: FeedContentVisibilityInput) {
+    const authorId = author?._id?.toString();
+    if (
+      author?.isSuspended ||
+      author?.profileVisibility === 'private' ||
+      hiddenAuthorIds.has(authorId ?? '')
+    ) {
+      return false;
+    }
+
     if (!currentUserId) return true;
 
-    const authorId = author?._id?.toString();
     const isHiddenByViewer = (hiddenBy ?? []).some(
       (hiddenUserId) => hiddenUserId.toString() === currentUserId,
     );
 
-    return !isHiddenByViewer && !hiddenAuthorIds.has(authorId ?? '');
+    return !isHiddenByViewer;
   }
 
   private isLikedByViewer(

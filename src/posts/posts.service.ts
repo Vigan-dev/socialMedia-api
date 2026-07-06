@@ -13,6 +13,7 @@ import { User } from '../users/schemas/user.schema';
 import type { UserDocument } from '../users/schemas/user.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { FeedPostResponse } from './dto/post-response.dto';
+import type { PublicPostResponse } from './dto/post-response.dto';
 import { RelationshipService } from '../users/relationship.service';
 import { PostFeedMapper } from './post-feed.mapper';
 import { PostReportsService } from './post-reports.service';
@@ -38,6 +39,11 @@ type FeedPageResponse = {
   hasMore: boolean;
   items: FeedPostResponse[];
   nextCursor: string | null;
+};
+
+type PublicViewerContext = {
+  hiddenAuthorIds: Set<string>;
+  viewerObjectId?: Types.ObjectId;
 };
 
 const recentTrendingWindowMultiplier = 3;
@@ -95,8 +101,11 @@ export class PostsService {
       }>('author', 'username email avatarUrl followers')
       .populate<{
         comments: PopulatedComment[];
-      }>('comments.author', 'username email')
-      .populate('comments.replies.author', 'username email')
+      }>('comments.author', 'username email isSuspended profileVisibility')
+      .populate(
+        'comments.replies.author',
+        'username email isSuspended profileVisibility',
+      )
       .exec();
 
     const filteredPosts = mapPostDocumentsToFeedModels(posts).filter((post) => {
@@ -127,43 +136,68 @@ export class PostsService {
     };
   }
 
-  async findById(postId: string): Promise<FeedPostResponse> {
-    const post = await this.findPostOrThrow(postId);
+  async findById(
+    postId: string,
+    viewerId?: string,
+  ): Promise<PublicPostResponse> {
+    const post = await this.findPublicPostOrThrow(postId, viewerId);
 
-    return this.populateAndMap(post);
+    return this.populateAndMapPublic(post, viewerId);
   }
 
-  async findByAuthorUsername(username: string): Promise<FeedPostResponse[]> {
+  async findByAuthorUsername(
+    username: string,
+    viewerId?: string,
+  ): Promise<PublicPostResponse[]> {
+    const visibility = await this.getPublicViewerContext(viewerId);
     const author = await this.userModel
       .findOne({
+        isSuspended: false,
+        profileVisibility: { $ne: 'private' },
         username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
       })
       .select('_id');
 
-    if (!author) {
+    if (
+      !author ||
+      visibility.hiddenAuthorIds.has(author._id.toString())
+    ) {
       throw new NotFoundException('User not found');
     }
 
     const posts = await this.postModel
-      .find({ author: author._id })
+      .find({
+        ...this.getPublicPostFilter(visibility.viewerObjectId),
+        author: author._id,
+      })
       .sort({ createdAt: -1 })
       .limit(50)
       .populate<{
         author: PopulatedAuthor;
-      }>('author', 'username email avatarUrl followers')
+      }>(
+        'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
       .populate<{
         comments: PopulatedComment[];
-      }>('comments.author', 'username email')
-      .populate('comments.replies.author', 'username email')
+      }>('comments.author', 'username email isSuspended profileVisibility')
+      .populate(
+        'comments.replies.author',
+        'username email isSuspended profileVisibility',
+      )
       .exec();
 
     return mapPostDocumentsToFeedModels(posts).map((post) =>
-      this.postFeedMapper.toFeedPost(post),
+      this.postFeedMapper.toPublicPost(
+        post,
+        viewerId,
+        visibility.hiddenAuthorIds,
+      ),
     );
   }
 
   async create(
-    createPostDto: { content: string; mediaUrls?: string[] },
+    createPostDto: { content?: string; mediaUrls?: string[] },
     user: AuthUser,
   ): Promise<FeedPostResponse> {
     const content = createPostDto.content?.trim() ?? '';
@@ -536,6 +570,41 @@ export class PostsService {
     return post;
   }
 
+  private async findPublicPostOrThrow(postId: string, viewerId?: string) {
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException('Invalid post id');
+    }
+
+    const visibility = await this.getPublicViewerContext(viewerId);
+    const post = await this.postModel
+      .findOne({
+        _id: new Types.ObjectId(postId),
+        ...this.getPublicPostFilter(visibility.viewerObjectId),
+      })
+      .populate<{ author: PopulatedAuthor }>(
+        'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      );
+
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    const feedPost = mapPostDocumentToFeedModel(post);
+    const authorId = feedPost.author?._id?.toString();
+
+    if (
+      !feedPost.author ||
+      feedPost.author.isSuspended ||
+      feedPost.author.profileVisibility === 'private' ||
+      visibility.hiddenAuthorIds.has(authorId ?? '')
+    ) {
+      throw new NotFoundException('Post not found');
+    }
+
+    return post;
+  }
+
   private findCommentOrThrow(post: PostDocument, commentId: string) {
     const comment = post.comments?.find(
       (item) => item._id.toString() === commentId,
@@ -608,5 +677,54 @@ export class PostsService {
       mapPostDocumentToFeedModel(populatedPost),
       userId,
     );
+  }
+
+  private async populateAndMapPublic(post: PostDocument, userId?: string) {
+    const visibility = await this.getPublicViewerContext(userId);
+    const populatedPost = await post.populate([
+      {
+        path: 'author',
+        select: 'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.author',
+        select: 'username email isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.replies.author',
+        select: 'username email isSuspended profileVisibility',
+      },
+    ]);
+
+    return this.postFeedMapper.toPublicPost(
+      mapPostDocumentToFeedModel(populatedPost),
+      userId,
+      visibility.hiddenAuthorIds,
+    );
+  }
+
+  private async getPublicViewerContext(
+    viewerId?: string,
+  ): Promise<PublicViewerContext> {
+    if (!viewerId) {
+      return { hiddenAuthorIds: new Set<string>() };
+    }
+
+    const visibility = await this.relationshipService.getViewerVisibility(
+      viewerId,
+    );
+
+    return {
+      hiddenAuthorIds: visibility.hiddenUserIds,
+      viewerObjectId: new Types.ObjectId(viewerId),
+    };
+  }
+
+  private getPublicPostFilter(viewerObjectId?: Types.ObjectId) {
+    return {
+      ...(viewerObjectId ? { hiddenBy: { $ne: viewerObjectId } } : {}),
+      isArchived: { $ne: true },
+      isHidden: { $ne: true },
+    };
   }
 }

@@ -4,6 +4,22 @@ import { User } from '../../users/schemas/user.schema';
 
 export type PostDocument = HydratedDocument<Post>;
 
+type PostContentValidationContext = {
+  mediaUrls?: string[];
+};
+
+function hasPostContentOrMedia(
+  this: PostContentValidationContext,
+  value?: string | null,
+) {
+  const hasContent = typeof value === 'string' && value.trim().length > 0;
+  const hasMedia =
+    Array.isArray(this.mediaUrls) &&
+    this.mediaUrls.some((url) => url.trim().length > 0);
+
+  return hasContent || hasMedia;
+}
+
 @Schema({ _id: true, timestamps: true })
 export class PostReply {
   _id!: Types.ObjectId;
@@ -47,7 +63,15 @@ export const PostCommentSchema = SchemaFactory.createForClass(PostComment);
 
 @Schema({ timestamps: true })
 export class Post {
-  @Prop({ required: true, trim: true, maxlength: 500 })
+  @Prop({
+    default: '',
+    trim: true,
+    maxlength: 500,
+    validate: {
+      validator: hasPostContentOrMedia,
+      message: 'Post content or media is required',
+    },
+  })
   content!: string;
 
   @Prop({ type: Types.ObjectId, ref: User.name, required: true })
@@ -64,6 +88,12 @@ export class Post {
 
   @Prop({ type: [String], default: [] })
   mediaUrls!: string[];
+
+  @Prop({ default: false, index: true })
+  isArchived!: boolean;
+
+  @Prop({ default: false, index: true })
+  isHidden!: boolean;
 
   @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
   hiddenBy!: Types.ObjectId[];

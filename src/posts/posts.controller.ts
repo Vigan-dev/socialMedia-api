@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -49,13 +50,18 @@ export class PostsController {
   }
 
   @Get('by-user/:username')
-  findByAuthorUsername(@Param('username') username: string) {
-    return this.postsService.findByAuthorUsername(username);
+  @UseGuards(OptionalJwtAuthGuard)
+  findByAuthorUsername(
+    @Param('username') username: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.findByAuthorUsername(username, request.user?.id);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.postsService.findById(id);
+  @UseGuards(OptionalJwtAuthGuard)
+  findOne(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.findById(id, request.user?.id);
   }
 
   @Post()

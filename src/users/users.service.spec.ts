@@ -8,6 +8,7 @@ describe('UsersService relationships', () => {
   let service: UsersService;
   let userModel: {
     exists: jest.Mock;
+    findOne: jest.Mock;
     findById: jest.Mock;
     updateOne: jest.Mock;
   };
@@ -26,6 +27,7 @@ describe('UsersService relationships', () => {
   beforeEach(() => {
     userModel = {
       exists: jest.fn(),
+      findOne: jest.fn(),
       findById: jest.fn(),
       updateOne: jest.fn(),
     };
@@ -190,6 +192,52 @@ describe('UsersService relationships', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
       service.muteUser(currentUserId, targetUserId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('returns a public profile only for a visible public user', async () => {
+    userModel.findOne.mockResolvedValue({
+      _id: new Types.ObjectId(targetUserId),
+      avatarUrl: '',
+      bio: 'Public bio',
+      followers: [],
+      following: [],
+      isSuspended: false,
+      profileVisibility: 'public',
+      role: 'user',
+      showOnlineStatus: true,
+      status: 'available',
+      username: 'Target User',
+    });
+    relationshipService.getHiddenUserIds.mockResolvedValue(new Set());
+
+    await expect(
+      service.getPublicProfileByUsername('Target User', currentUserId),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: targetUserId,
+        name: 'Target User',
+      }),
+    );
+
+    expect(userModel.findOne).toHaveBeenCalledWith({
+      isSuspended: false,
+      profileVisibility: { $ne: 'private' },
+      username: expect.any(RegExp),
+    });
+  });
+
+  it('hides a public profile when relationship visibility blocks it', async () => {
+    userModel.findOne.mockResolvedValue({
+      _id: new Types.ObjectId(targetUserId),
+      username: 'Target User',
+    });
+    relationshipService.getHiddenUserIds.mockResolvedValue(
+      new Set([targetUserId]),
+    );
+
+    await expect(
+      service.getPublicProfileByUsername('Target User', currentUserId),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

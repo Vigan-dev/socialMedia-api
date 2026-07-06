@@ -161,4 +161,87 @@ describe('PostFeedMapper', () => {
     expect(response.commentItems?.[0].content).toBe('Visible comment');
     expect(response.commentItems?.[0].replies).toEqual([]);
   });
+
+  it('maps public posts without internal or viewer-specific fields', () => {
+    const viewerId = new Types.ObjectId();
+    const authorId = new Types.ObjectId();
+    const hiddenAuthorId = new Types.ObjectId();
+    const suspendedAuthorId = new Types.ObjectId();
+    const createdAt = new Date('2026-06-15T10:00:00.000Z');
+
+    const response = mapper.toPublicPost(
+      {
+        _id: new Types.ObjectId(),
+        author: {
+          _id: authorId,
+          email: 'author@example.com',
+          followers: [viewerId],
+          username: 'Public Author',
+        },
+        comments: [
+          {
+            _id: new Types.ObjectId(),
+            author: {
+              _id: suspendedAuthorId,
+              email: 'suspended@example.com',
+              isSuspended: true,
+              username: 'Suspended User',
+            },
+            content: 'Should not be public',
+            createdAt,
+            hiddenBy: [],
+            likedBy: [],
+            replies: [],
+          },
+          {
+            _id: new Types.ObjectId(),
+            author: {
+              _id: authorId,
+              email: 'visible@example.com',
+              username: 'Visible User',
+            },
+            content: 'Visible public comment',
+            createdAt,
+            hiddenBy: [],
+            likedBy: [viewerId],
+            replies: [
+              {
+                _id: new Types.ObjectId(),
+                author: {
+                  _id: hiddenAuthorId,
+                  email: 'hidden@example.com',
+                  username: 'Hidden User',
+                },
+                content: 'Hidden reply',
+                createdAt,
+                hiddenBy: [],
+                likedBy: [],
+              },
+            ],
+          },
+        ],
+        commentsCount: 2,
+        content: 'Public post',
+        createdAt,
+        likedBy: [viewerId],
+      } satisfies PostWithAuthor,
+      viewerId.toString(),
+      new Set([hiddenAuthorId.toString()]),
+    );
+
+    expect(response).toEqual(
+      expect.not.objectContaining({
+        authorId: expect.any(String),
+        isFollowing: expect.any(Boolean),
+        isLiked: expect.any(Boolean),
+        isOwnPost: expect.any(Boolean),
+      }),
+    );
+    expect(response.commentItems).toHaveLength(1);
+    expect(response.comments).toBe(1);
+    expect(response.commentItems[0]).toEqual(
+      expect.not.objectContaining({ isLiked: expect.any(Boolean) }),
+    );
+    expect(response.commentItems[0].replies).toEqual([]);
+  });
 });
