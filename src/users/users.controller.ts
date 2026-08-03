@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -33,8 +34,12 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  findAll(@Req() request: RequestWithUser) {
-    return this.usersService.findAll(request.user?.id);
+  findAll(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.findAll(request.user?.id, { cursor, limit });
   }
 
   @Get('me')
@@ -43,13 +48,21 @@ export class UsersController {
   }
 
   @Get('me/followers')
-  getMyFollowers(@Req() request: RequestWithUser) {
-    return this.usersService.findFollowers(request.user!.id);
+  getMyFollowers(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.findFollowers(request.user!.id, { cursor, limit });
   }
 
   @Get('me/following')
-  getMyFollowing(@Req() request: RequestWithUser) {
-    return this.usersService.findFollowing(request.user!.id);
+  getMyFollowing(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.findFollowing(request.user!.id, { cursor, limit });
   }
 
   @Get('suggestions')
@@ -99,9 +112,14 @@ export class UsersController {
     return this.usersService.updateNotificationSettings(request.user!.id, body);
   }
 
-  @Post(':id/follow')
-  toggleFollow(@Param('id') id: string, @Req() request: RequestWithUser) {
-    return this.usersService.toggleFollow(request.user!.id, id);
+  @Put(':id/follow')
+  follow(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.usersService.setFollow(request.user!.id, id, true);
+  }
+
+  @Delete(':id/follow')
+  unfollow(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.usersService.setFollow(request.user!.id, id, false);
   }
 
   @Post(':id/block')

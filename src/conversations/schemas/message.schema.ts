@@ -7,6 +7,8 @@ export type MessageDocument = HydratedDocument<Message>;
 
 @Schema({ timestamps: true })
 export class Message {
+  _id!: Types.ObjectId;
+
   @Prop({
     type: Types.ObjectId,
     ref: Conversation.name,
@@ -34,8 +36,12 @@ export class Message {
     default: [],
   })
   readBy!: Array<{ user: Types.ObjectId; readAt: Date }>;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
 
-MessageSchema.index({ conversation: 1, createdAt: 1 });
+MessageSchema.index({ conversation: 1, createdAt: -1, _id: -1 });

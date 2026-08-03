@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { CommunicationPolicyService } from './communication-policy.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
 import {
@@ -20,7 +21,7 @@ import { Message, MessageSchema } from './schemas/message.schema';
     NotificationsModule,
   ],
   controllers: [ConversationsController],
-  providers: [ConversationsService],
-  exports: [ConversationsService],
+  providers: [CommunicationPolicyService, ConversationsService],
+  exports: [CommunicationPolicyService, ConversationsService],
 })
 export class ConversationsModule {}

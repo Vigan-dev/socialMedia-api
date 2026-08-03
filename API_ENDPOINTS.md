@@ -8,6 +8,20 @@ http://localhost:3000
 
 Most app endpoints use HTTP-only cookies for authentication. Log in through `POST /auth/login`; authenticated requests should include credentials/cookies.
 
+## Cursor pagination
+
+Paginated endpoints accept `limit` and an optional opaque `cursor`. Do not inspect or construct cursors on the client; pass the previous response's `nextCursor` back unchanged.
+
+```json
+{
+  "items": [],
+  "hasMore": false,
+  "nextCursor": null
+}
+```
+
+The default page size is 30 for users, conversations, messages, and notifications, and 20 for support sessions. All of these endpoints cap `limit` at 50.
+
 ## Health
 
 | Method | Path | Auth | Description |
@@ -31,11 +45,11 @@ All user endpoints require authentication.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/users` | List visible users. |
+| `GET` | `/users?limit=30&cursor=...` | List visible users ordered by username. Returns a cursor page. |
 | `GET` | `/users/me` | Get the current user profile. |
-| `GET` | `/users/me/followers` | Get the current user's followers. |
-| `GET` | `/users/me/following` | Get users followed by the current user. |
-| `GET` | `/users/suggestions` | Get suggested users. |
+| `GET` | `/users/me/followers?limit=30&cursor=...` | Get the current user's followers as a cursor page. |
+| `GET` | `/users/me/following?limit=30&cursor=...` | Get users followed by the current user as a cursor page. |
+| `GET` | `/users/suggestions` | Get up to five suggested users ranked in MongoDB by follower count and username. |
 | `GET` | `/users/username-availability?username=value` | Check username availability. |
 | `PATCH` | `/users/me` | Update profile fields such as username, bio, and uploaded avatar URL. |
 | `PATCH` | `/users/avatar` | Update uploaded avatar URL. |
@@ -72,7 +86,7 @@ All notification endpoints require authentication.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/notifications` | Get notifications for the current user. |
+| `GET` | `/notifications?limit=30&cursor=...` | Get current-user notifications newest-first as a cursor page. |
 | `PATCH` | `/notifications/read-all` | Mark all current-user notifications as read. |
 
 ## Conversations
@@ -81,9 +95,9 @@ All conversation endpoints require authentication.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/conversations` | Get current-user conversations. |
+| `GET` | `/conversations?limit=30&cursor=...` | Get current-user conversations newest-first as a cursor page. |
 | `POST` | `/conversations` | Find or create a conversation with `participantId`. |
-| `GET` | `/conversations/:id/messages` | Get messages for a conversation. |
+| `GET` | `/conversations/:id/messages?limit=30&cursor=...` | Get messages newest-first as a cursor page. Pass `nextCursor` to load older messages. |
 | `POST` | `/conversations/:id/messages` | Send a message. |
 | `PATCH` | `/conversations/:id/read` | Mark a conversation as read. |
 | `PATCH` | `/conversations/:id/typing` | Update typing state. |
@@ -122,5 +136,5 @@ AI support endpoints require authentication. Support chat sessions are scoped to
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/ai/support-chat` | Send a support-chat message and get an assistant reply for the current user. |
-| `GET` | `/ai/support-chat` | List current-user support-chat sessions. |
+| `GET` | `/ai/support-chat?limit=20&cursor=...` | List current-user support-chat sessions newest-first as a cursor page. |
 | `GET` | `/ai/support-chat/:sessionId` | Get messages for a current-user support-chat session. |

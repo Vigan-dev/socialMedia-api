@@ -27,6 +27,7 @@ import type {
   PostWithAuthor,
 } from './post-feed.types';
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
+import { normalizeUsernameLower } from '../users/user-identity';
 
 type AuthUser = {
   id: string;
@@ -45,12 +46,71 @@ type FeedPageResponse = {
   nextCursor: string | null;
 };
 
+type LatestFeedCursor = {
+  createdAt: Date;
+  id?: Types.ObjectId;
+};
+
 type PublicViewerContext = {
   hiddenAuthorIds: Set<string>;
   viewerObjectId?: Types.ObjectId;
 };
 
 const recentTrendingWindowMultiplier = 3;
+
+function decodeLatestFeedCursor(cursor: string): LatestFeedCursor {
+  let decoded: unknown;
+
+  try {
+    decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    decoded = null;
+  }
+
+  if (decoded && typeof decoded === 'object') {
+    const value = decoded as Record<string, unknown>;
+
+    if (
+      typeof value.createdAt === 'string' &&
+      typeof value.id === 'string' &&
+      Types.ObjectId.isValid(value.id)
+    ) {
+      const createdAt = new Date(value.createdAt);
+
+      if (!Number.isNaN(createdAt.getTime())) {
+        return {
+          createdAt,
+          id: new Types.ObjectId(value.id),
+        };
+      }
+    }
+  }
+
+  // Accept timestamp-only cursors issued before compound cursors were added.
+  const legacyCreatedAt = new Date(cursor);
+
+  if (!Number.isNaN(legacyCreatedAt.getTime())) {
+    return { createdAt: legacyCreatedAt };
+  }
+
+  throw new BadRequestException('Invalid feed cursor');
+}
+
+function encodeLatestFeedCursor(
+  post: Pick<PostWithAuthor, '_id' | 'createdAt'>,
+): string | null {
+  if (!post.createdAt) {
+    return null;
+  }
+
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: post.createdAt.toISOString(),
+      id: post._id.toString(),
+    }),
+    'utf8',
+  ).toString('base64url');
+}
 
 @Injectable()
 export class PostsService {
@@ -76,29 +136,46 @@ export class PostsService {
     const hiddenAuthorIds = visibility?.hiddenUserIds ?? new Set<string>();
     const feed = query.feed === 'following' ? 'following' : 'all';
     const sort =
-      query.sort === 'trending' || query.sort === 'top'
-        ? 'trending'
-        : 'latest';
+      query.sort === 'trending' || query.sort === 'top' ? 'trending' : 'latest';
     const limit = Math.min(Math.max(Number(query.limit) || 12, 1), 30);
-    const cursorDate =
-      sort === 'latest' && query.cursor ? new Date(query.cursor) : null;
+    const cursor =
+      sort === 'latest' && query.cursor
+        ? decodeLatestFeedCursor(query.cursor)
+        : null;
     const queryLimit =
       sort === 'trending' ? limit * recentTrendingWindowMultiplier : limit + 1;
     const postQuery: Record<string, unknown> = userId
       ? { hiddenBy: { $ne: new Types.ObjectId(userId) } }
       : {};
+    const hiddenAuthorObjectIds = [...hiddenAuthorIds]
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    const authorFilter: Record<string, Types.ObjectId[]> = {};
 
-    if (cursorDate && !Number.isNaN(cursorDate.getTime())) {
-      postQuery.createdAt = { $lt: cursorDate };
+    if (cursor?.id) {
+      postQuery.$or = [
+        { createdAt: { $lt: cursor.createdAt } },
+        { createdAt: cursor.createdAt, _id: { $lt: cursor.id } },
+      ];
+    } else if (cursor) {
+      postQuery.createdAt = { $lt: cursor.createdAt };
     }
 
     if (feed === 'following') {
-      postQuery.author = { $in: visibility?.followingIds ?? [] };
+      authorFilter.$in = visibility?.followingIds ?? [];
+    }
+
+    if (hiddenAuthorObjectIds.length > 0) {
+      authorFilter.$nin = hiddenAuthorObjectIds;
+    }
+
+    if (Object.keys(authorFilter).length > 0) {
+      postQuery.author = authorFilter;
     }
 
     const posts = await this.postModel
       .find(postQuery)
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(queryLimit)
       .populate<{
         author: PopulatedAuthor;
@@ -136,7 +213,7 @@ export class PostsService {
     return {
       hasMore,
       items,
-      nextCursor: lastPost?.createdAt?.toISOString() ?? null,
+      nextCursor: lastPost ? encodeLatestFeedCursor(lastPost) : null,
     };
   }
 
@@ -163,14 +240,11 @@ export class PostsService {
       .findOne({
         isSuspended: false,
         profileVisibility: { $ne: 'private' },
-        username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
+        usernameLower: normalizeUsernameLower(username),
       })
       .select('_id');
 
-    if (
-      !author ||
-      visibility.hiddenAuthorIds.has(author._id.toString())
-    ) {
+    if (!author || visibility.hiddenAuthorIds.has(author._id.toString())) {
       throw new NotFoundException('User not found');
     }
 
@@ -246,27 +320,26 @@ export class PostsService {
     );
   }
 
-  async toggleLike(postId: string, user: AuthUser): Promise<FeedPostResponse> {
+  async setLike(
+    postId: string,
+    user: AuthUser,
+    shouldLike: boolean,
+  ): Promise<FeedPostResponse> {
     if (!Types.ObjectId.isValid(postId)) {
       throw new BadRequestException('Invalid post id');
     }
 
     const userObjectId = new Types.ObjectId(user.id);
     const postObjectId = new Types.ObjectId(postId);
-    const unlikeResult = await this.postModel.updateOne(
-      { _id: postObjectId, likedBy: userObjectId },
-      { $pull: { likedBy: userObjectId } },
+    const updateResult = await this.postModel.updateOne(
+      { _id: postObjectId },
+      shouldLike
+        ? { $addToSet: { likedBy: userObjectId } }
+        : { $pull: { likedBy: userObjectId } },
     );
 
-    if (unlikeResult.matchedCount === 0) {
-      const likeResult = await this.postModel.updateOne(
-        { _id: postObjectId },
-        { $addToSet: { likedBy: userObjectId } },
-      );
-
-      if (likeResult.matchedCount === 0) {
-        throw new NotFoundException('Post not found');
-      }
+    if (updateResult.matchedCount === 0) {
+      throw new NotFoundException('Post not found');
     }
 
     const post = await this.postModel.findById(postId);
@@ -275,7 +348,7 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    if (unlikeResult.matchedCount === 0) {
+    if (shouldLike && updateResult.modifiedCount > 0) {
       await this.notificationsService.create({
         actorId: user.id,
         postId,
@@ -322,11 +395,11 @@ export class PostsService {
     }
 
     const nextContent = hasContentUpdate
-      ? updatePostDto.content?.trim() ?? ''
+      ? (updatePostDto.content?.trim() ?? '')
       : post.content;
     const nextMediaUrls = hasMediaUpdate
       ? this.normalizeMediaUrls(updatePostDto.mediaUrls)
-      : post.mediaUrls ?? [];
+      : (post.mediaUrls ?? []);
 
     if (!nextContent && nextMediaUrls.length === 0) {
       throw new BadRequestException('Post content or media is required');
@@ -474,23 +547,36 @@ export class PostsService {
     );
   }
 
-  async toggleCommentLike(
+  async setCommentLike(
     postId: string,
     commentId: string,
     user: AuthUser,
+    shouldLike: boolean,
   ): Promise<FeedPostResponse> {
-    const post = await this.findPostOrThrow(postId);
-    const comment = this.findCommentOrThrow(post, commentId);
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException('Invalid post id');
+    }
+
+    if (!Types.ObjectId.isValid(commentId)) {
+      throw new BadRequestException('Invalid comment id');
+    }
+
     const userObjectId = new Types.ObjectId(user.id);
-    comment.likedBy = comment.likedBy ?? [];
+    const commentObjectId = new Types.ObjectId(commentId);
+    const updateResult = await this.postModel.updateOne(
+      { _id: new Types.ObjectId(postId), 'comments._id': commentObjectId },
+      shouldLike
+        ? { $addToSet: { 'comments.$[comment].likedBy': userObjectId } }
+        : { $pull: { 'comments.$[comment].likedBy': userObjectId } },
+      { arrayFilters: [{ 'comment._id': commentObjectId }] },
+    );
 
-    const hasLiked = comment.likedBy.some((id) => id.equals(userObjectId));
-    comment.likedBy = hasLiked
-      ? comment.likedBy.filter((id) => !id.equals(userObjectId))
-      : [...comment.likedBy, userObjectId];
+    if (updateResult.matchedCount === 0) {
+      const post = await this.findPostOrThrow(postId);
+      this.findCommentOrThrow(post, commentId);
+    }
 
-    await post.save();
-
+    const post = await this.findPostOrThrow(postId);
     return this.populateAndMap(post, user.id);
   }
 
@@ -543,25 +629,64 @@ export class PostsService {
     return this.populateAndMap(post, user.id);
   }
 
-  async toggleReplyLike(
+  async setReplyLike(
     postId: string,
     commentId: string,
     replyId: string,
     user: AuthUser,
+    shouldLike: boolean,
   ): Promise<FeedPostResponse> {
-    const post = await this.findPostOrThrow(postId);
-    const comment = this.findCommentOrThrow(post, commentId);
-    const reply = this.findReplyOrThrow(comment, replyId);
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException('Invalid post id');
+    }
+
+    if (!Types.ObjectId.isValid(commentId)) {
+      throw new BadRequestException('Invalid comment id');
+    }
+
+    if (!Types.ObjectId.isValid(replyId)) {
+      throw new BadRequestException('Invalid reply id');
+    }
+
     const userObjectId = new Types.ObjectId(user.id);
-    reply.likedBy = reply.likedBy ?? [];
+    const commentObjectId = new Types.ObjectId(commentId);
+    const replyObjectId = new Types.ObjectId(replyId);
+    const updateResult = await this.postModel.updateOne(
+      {
+        _id: new Types.ObjectId(postId),
+        comments: {
+          $elemMatch: {
+            _id: commentObjectId,
+            'replies._id': replyObjectId,
+          },
+        },
+      },
+      shouldLike
+        ? {
+            $addToSet: {
+              'comments.$[comment].replies.$[reply].likedBy': userObjectId,
+            },
+          }
+        : {
+            $pull: {
+              'comments.$[comment].replies.$[reply].likedBy': userObjectId,
+            },
+          },
+      {
+        arrayFilters: [
+          { 'comment._id': commentObjectId },
+          { 'reply._id': replyObjectId },
+        ],
+      },
+    );
 
-    const hasLiked = reply.likedBy.some((id) => id.equals(userObjectId));
-    reply.likedBy = hasLiked
-      ? reply.likedBy.filter((id) => !id.equals(userObjectId))
-      : [...reply.likedBy, userObjectId];
+    if (updateResult.matchedCount === 0) {
+      const post = await this.findPostOrThrow(postId);
+      const comment = this.findCommentOrThrow(post, commentId);
+      this.findReplyOrThrow(comment, replyId);
+    }
 
-    await post.save();
-
+    const post = await this.findPostOrThrow(postId);
     return this.populateAndMap(post, user.id);
   }
 
@@ -681,10 +806,6 @@ export class PostsService {
     return normalizedUrls;
   }
 
-  private escapeRegex(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
   private async populateAndMap(post: PostDocument, userId?: string) {
     const populatedPost = await post.populate([
       { path: 'author', select: 'username email avatarUrl followers' },
@@ -705,9 +826,8 @@ export class PostsService {
       return { hiddenAuthorIds: new Set<string>() };
     }
 
-    const visibility = await this.relationshipService.getViewerVisibility(
-      viewerId,
-    );
+    const visibility =
+      await this.relationshipService.getViewerVisibility(viewerId);
 
     return {
       hiddenAuthorIds: visibility.hiddenUserIds,

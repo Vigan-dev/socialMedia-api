@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import type { QueryFilter } from 'mongoose';
 
 import { User } from './schemas/user.schema';
 import type { UserDocument } from './schemas/user.schema';
@@ -19,8 +21,25 @@ import type {
 import { UserResponseMapper } from './user-response.mapper';
 import type { MessagePrivacy, UserStatus } from './user.constants';
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
+import {
+  getDuplicateIdentityField,
+  normalizeEmail,
+  normalizeUsername,
+  normalizeUsernameLower,
+} from './user-identity';
+import {
+  buildCursorPage,
+  decodeCursor,
+  encodeCursor,
+  parsePageLimit,
+} from '../common/pagination/cursor-pagination';
 
 const MAX_AVATAR_URL_LENGTH = 2048;
+
+type UserPageQuery = {
+  cursor?: string;
+  limit?: string;
+};
 
 @Injectable()
 export class UsersService {
@@ -34,12 +53,14 @@ export class UsersService {
   ) {}
 
   async findByEmail(email: string) {
-    return this.userModel.findOne({ email }).select('+password');
+    return this.userModel
+      .findOne({ emailLower: normalizeEmail(email) })
+      .select('+password');
   }
 
   async findByEmailWithPasswordReset(email: string) {
     return this.userModel
-      .findOne({ email })
+      .findOne({ emailLower: normalizeEmail(email) })
       .select('+passwordResetTokenHash +passwordResetExpiresAt');
   }
 
@@ -112,7 +133,13 @@ export class UsersService {
   }
 
   async create(userData: Partial<User>): Promise<UserProfileResponse> {
-    const user = await this.userModel.create(userData);
+    let user: UserDocument;
+
+    try {
+      user = await this.userModel.create(this.withCanonicalIdentity(userData));
+    } catch (error) {
+      this.throwIdentityConflict(error);
+    }
 
     return this.userResponseMapper.toProfile(user);
   }
@@ -122,108 +149,127 @@ export class UsersService {
     password: string;
     username: string;
   }) {
-    const existingUser = await this.userModel.findOne({
-      $or: [{ email: userData.email }, { username: userData.username }],
-    });
+    const email = normalizeEmail(userData.email);
+    const username = normalizeUsername(userData.username);
+    const usernameLower = normalizeUsernameLower(username);
 
-    if (existingUser) {
-      existingUser.email = userData.email;
-      existingUser.isSuspended = false;
-      existingUser.password = userData.password;
-      existingUser.role = 'admin';
-      existingUser.suspensionReason = '';
-      existingUser.username = userData.username;
-      await existingUser.save();
-      return;
+    try {
+      const existingUser = await this.userModel.findOne({
+        $or: [{ emailLower: email }, { usernameLower }],
+      });
+
+      if (existingUser) {
+        existingUser.email = email;
+        existingUser.emailLower = email;
+        existingUser.isSuspended = false;
+        existingUser.password = userData.password;
+        existingUser.role = 'admin';
+        existingUser.suspensionReason = '';
+        existingUser.username = username;
+        existingUser.usernameLower = usernameLower;
+        await existingUser.save();
+        return;
+      }
+
+      await this.userModel.create({
+        email,
+        emailLower: email,
+        isSuspended: false,
+        password: userData.password,
+        role: 'admin',
+        suspensionReason: '',
+        username,
+        usernameLower,
+      });
+    } catch (error) {
+      this.throwIdentityConflict(error);
     }
-
-    await this.userModel.create({
-      email: userData.email,
-      isSuspended: false,
-      password: userData.password,
-      role: 'admin',
-      suspensionReason: '',
-      username: userData.username,
-    });
   }
 
   async setAdminPasswordByEmail(userData: { email: string; password: string }) {
-    await this.userModel.updateOne(
-      { email: userData.email },
-      {
-        $set: {
-          email: userData.email,
-          isSuspended: false,
-          password: userData.password,
-          role: 'admin',
-          suspensionReason: '',
+    const email = normalizeEmail(userData.email);
+
+    try {
+      await this.userModel.updateOne(
+        { emailLower: email },
+        {
+          $set: {
+            email,
+            emailLower: email,
+            isSuspended: false,
+            password: userData.password,
+            role: 'admin',
+            suspensionReason: '',
+          },
         },
-      },
-      { runValidators: true },
-    );
+        { runValidators: true },
+      );
+    } catch (error) {
+      this.throwIdentityConflict(error);
+    }
   }
 
-  async findAll(currentUserId?: string): Promise<NetworkUserResponse[]> {
-    const users = await this.userModel.find().sort({ username: 1 }).exec();
+  async findAll(currentUserId?: string, query: UserPageQuery = {}) {
     const hiddenUserIds = currentUserId
       ? await this.relationshipService.getHiddenUserIds(currentUserId)
       : new Set<string>();
+    const excludedIds = [
+      ...(currentUserId ? [new Types.ObjectId(currentUserId)] : []),
+      ...this.toObjectIds(hiddenUserIds),
+    ];
 
-    return users
-      .filter(
-        (user) =>
-          this.getUserId(user) !== currentUserId &&
-          !hiddenUserIds.has(this.getUserId(user)),
-      )
-      .map((user) =>
-        this.userResponseMapper.toNetworkUser(user, currentUserId),
-      );
+    return this.findNetworkUserPage({
+      currentUserId,
+      filter: excludedIds.length ? { _id: { $nin: excludedIds } } : {},
+      query,
+      scope: 'users',
+    });
   }
 
-  async findFollowers(userId: string): Promise<NetworkUserResponse[]> {
+  async findFollowers(userId: string, query: UserPageQuery = {}) {
     const user = await this.userModel.findById(userId).select('followers');
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    const followers = await this.userModel
-      .find({ _id: { $in: user.followers ?? [] } })
-      .sort({ username: 1 })
-      .exec();
-
     const hiddenUserIds =
       await this.relationshipService.getHiddenUserIds(userId);
 
-    return followers
-      .filter((follower) => !hiddenUserIds.has(this.getUserId(follower)))
-      .map((follower) =>
-        this.userResponseMapper.toNetworkUser(follower, userId),
-      );
+    return this.findNetworkUserPage({
+      currentUserId: userId,
+      filter: {
+        _id: {
+          $in: user.followers ?? [],
+          $nin: this.toObjectIds(hiddenUserIds),
+        },
+      },
+      query,
+      scope: 'user-followers',
+    });
   }
 
-  async findFollowing(userId: string): Promise<NetworkUserResponse[]> {
+  async findFollowing(userId: string, query: UserPageQuery = {}) {
     const user = await this.userModel.findById(userId).select('following');
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    const following = await this.userModel
-      .find({ _id: { $in: user.following ?? [] } })
-      .sort({ username: 1 })
-      .exec();
-
     const hiddenUserIds =
       await this.relationshipService.getHiddenUserIds(userId);
 
-    return following
-      .filter(
-        (followedUser) => !hiddenUserIds.has(this.getUserId(followedUser)),
-      )
-      .map((followedUser) =>
-        this.userResponseMapper.toNetworkUser(followedUser, userId),
-      );
+    return this.findNetworkUserPage({
+      currentUserId: userId,
+      filter: {
+        _id: {
+          $in: user.following ?? [],
+          $nin: this.toObjectIds(hiddenUserIds),
+        },
+      },
+      query,
+      scope: 'user-following',
+    });
   }
 
   async findSuggestedUsers(userId: string): Promise<NetworkUserResponse[]> {
@@ -234,28 +280,27 @@ export class UsersService {
     const excludedIds = [
       new Types.ObjectId(userId),
       ...visibility.followingIds,
-      ...visibility.blockedUserIds,
-      ...visibility.mutedUserIds,
+      ...this.toObjectIds(visibility.hiddenUserIds),
     ];
     const candidates = await this.userModel
-      .find({ _id: { $nin: excludedIds } })
-      .sort({ username: 1 })
+      .aggregate<UserDocument>([
+        { $match: { _id: { $nin: excludedIds } } },
+        {
+          $addFields: {
+            suggestionFollowerCount: {
+              $size: { $ifNull: ['$followers', []] },
+            },
+          },
+        },
+        { $sort: { suggestionFollowerCount: -1, usernameLower: 1, _id: 1 } },
+        { $limit: 5 },
+        { $project: { suggestionFollowerCount: 0 } },
+      ])
       .exec();
 
-    return candidates
-      .sort(
-        (a, b) =>
-          (b.followers ?? []).length - (a.followers ?? []).length ||
-          a.username.localeCompare(b.username),
-      )
-      .filter(
-        (suggestion) =>
-          !visibility.hiddenUserIds.has(this.getUserId(suggestion)),
-      )
-      .slice(0, 5)
-      .map((suggestion) =>
-        this.userResponseMapper.toNetworkUser(suggestion, userId),
-      );
+    return candidates.map((suggestion) =>
+      this.userResponseMapper.toNetworkUser(suggestion, userId),
+    );
   }
 
   async getProfile(userId: string): Promise<UserProfileResponse> {
@@ -278,7 +323,7 @@ export class UsersService {
     const user = await this.userModel.findOne({
       isSuspended: false,
       profileVisibility: { $ne: 'private' },
-      username: new RegExp(`^${this.escapeRegex(username.trim())}$`, 'i'),
+      usernameLower: normalizeUsernameLower(username),
     });
 
     if (!user || hiddenUserIds.has(this.getUserId(user))) {
@@ -299,6 +344,7 @@ export class UsersService {
 
     if (username) {
       update.username = username;
+      update.usernameLower = normalizeUsernameLower(username);
     }
 
     if (data.bio !== undefined) {
@@ -310,10 +356,16 @@ export class UsersService {
       update.avatarUrl = avatarUrl;
     }
 
-    const user = await this.userModel.findByIdAndUpdate(userId, update, {
-      returnDocument: 'after',
-      runValidators: true,
-    });
+    let user: UserDocument | null;
+
+    try {
+      user = await this.userModel.findByIdAndUpdate(userId, update, {
+        returnDocument: 'after',
+        runValidators: true,
+      });
+    } catch (error) {
+      this.throwIdentityConflict(error);
+    }
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -332,7 +384,7 @@ export class UsersService {
     const existingUser = await this.userModel
       .findOne({
         _id: { $ne: new Types.ObjectId(userId) },
-        username: new RegExp(`^${this.escapeRegex(trimmedUsername)}$`, 'i'),
+        usernameLower: normalizeUsernameLower(trimmedUsername),
       })
       .select('_id');
 
@@ -571,8 +623,99 @@ export class UsersService {
     return { id: targetUserId, muted: false };
   }
 
+  private async findNetworkUserPage({
+    currentUserId,
+    filter,
+    query,
+    scope,
+  }: {
+    currentUserId?: string;
+    filter: QueryFilter<UserDocument>;
+    query: UserPageQuery;
+    scope: string;
+  }) {
+    const limit = parsePageLimit(query.limit, 30, 50);
+    const cursor = decodeCursor(scope, query.cursor);
+    let cursorFilter: QueryFilter<UserDocument> | null = null;
+
+    if (cursor) {
+      if (!Types.ObjectId.isValid(cursor.id)) {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+
+      cursorFilter = {
+        $or: [
+          { usernameLower: { $gt: cursor.sortValue } },
+          {
+            _id: { $gt: new Types.ObjectId(cursor.id) },
+            usernameLower: cursor.sortValue,
+          },
+        ],
+      };
+    }
+
+    const users = await this.userModel
+      .find(cursorFilter ? { $and: [filter, cursorFilter] } : filter)
+      .sort({ usernameLower: 1, _id: 1 })
+      .limit(limit + 1)
+      .exec();
+    const page = buildCursorPage(users, limit, (user) =>
+      encodeCursor(scope, {
+        id: this.getUserId(user),
+        sortValue: user.usernameLower,
+      }),
+    );
+
+    return {
+      ...page,
+      items: page.items.map((user) =>
+        this.userResponseMapper.toNetworkUser(user, currentUserId),
+      ),
+    };
+  }
+
+  private toObjectIds(userIds: Set<string>) {
+    return [...userIds]
+      .filter((userId) => Types.ObjectId.isValid(userId))
+      .map((userId) => new Types.ObjectId(userId));
+  }
+
   private getUserId(user: UserDocument) {
     return this.userResponseMapper.getUserId(user);
+  }
+
+  private withCanonicalIdentity(userData: Partial<User>): Partial<User> {
+    const normalized = { ...userData };
+
+    if (typeof userData.email === 'string') {
+      normalized.email = normalizeEmail(userData.email);
+      normalized.emailLower = normalized.email;
+    }
+
+    if (typeof userData.username === 'string') {
+      normalized.username = normalizeUsername(userData.username);
+      normalized.usernameLower = normalizeUsernameLower(userData.username);
+    }
+
+    return normalized;
+  }
+
+  private throwIdentityConflict(error: unknown): never {
+    const duplicateField = getDuplicateIdentityField(error);
+
+    if (!duplicateField) {
+      throw error;
+    }
+
+    if (duplicateField === 'email') {
+      throw new ConflictException('Email is already in use');
+    }
+
+    if (duplicateField === 'username') {
+      throw new ConflictException('Username is already in use');
+    }
+
+    throw new ConflictException('Email or username is already in use');
   }
 
   private assertValidAvatarUrl(avatarUrl: string) {
@@ -595,9 +738,5 @@ export class UsersService {
         'Avatar must reference an uploaded avatar image',
       );
     }
-  }
-
-  private escapeRegex(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 }

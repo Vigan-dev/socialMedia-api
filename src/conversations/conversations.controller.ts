@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -30,8 +31,15 @@ export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
 
   @Get()
-  findMine(@Req() request: RequestWithUser) {
-    return this.conversationsService.findForUser(request.user!.id);
+  findMine(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.conversationsService.findForUser(request.user!.id, {
+      cursor,
+      limit,
+    });
   }
 
   @Post()
@@ -47,8 +55,16 @@ export class ConversationsController {
   }
 
   @Get(':id/messages')
-  findMessages(@Req() request: RequestWithUser, @Param('id') id: string) {
-    return this.conversationsService.findMessages(request.user!.id, id);
+  findMessages(
+    @Req() request: RequestWithUser,
+    @Param('id') id: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.conversationsService.findMessages(request.user!.id, id, {
+      cursor,
+      limit,
+    });
   }
 
   @Post(':id/messages')

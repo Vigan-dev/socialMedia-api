@@ -1,11 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type SupportChatConversationDocument =
   HydratedDocument<SupportChatConversation>;
 
 @Schema({ timestamps: true })
 export class SupportChatConversation {
+  _id!: Types.ObjectId;
+
   @Prop({ required: true, index: true })
   userId!: string;
 
@@ -32,3 +34,9 @@ export class SupportChatConversation {
 export const SupportChatConversationSchema = SchemaFactory.createForClass(
   SupportChatConversation,
 );
+
+SupportChatConversationSchema.index({
+  userId: 1,
+  lastMessageAt: -1,
+  _id: -1,
+});

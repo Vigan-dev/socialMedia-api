@@ -6,6 +6,11 @@ import mongoose, { Types } from 'mongoose';
 import { Post, PostSchema } from '../src/posts/schemas/post.schema';
 import { Report, ReportSchema } from '../src/posts/schemas/report.schema';
 import { User, UserSchema } from '../src/users/schemas/user.schema';
+import {
+  normalizeEmail,
+  normalizeUsername,
+  normalizeUsernameLower,
+} from '../src/users/user-identity';
 
 type DemoUserSeed = {
   avatarUrl?: string;
@@ -95,14 +100,19 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
   );
 
   for (const [index, user] of demoUsers.entries()) {
+    const email = normalizeEmail(user.email);
+    const username = normalizeUsername(user.username);
+    const usernameLower = normalizeUsernameLower(username);
     const conflictingUsers = await UserModel.find({
-      $or: [{ email: user.email }, { username: user.username }],
+      $or: [{ emailLower: email }, { usernameLower }],
     })
-      .select('_id email username')
+      .select('_id emailLower usernameLower')
       .exec();
     const existingUser =
-      conflictingUsers.find((candidate) => candidate.email === user.email) ??
-      conflictingUsers.find((candidate) => candidate.username === user.username);
+      conflictingUsers.find((candidate) => candidate.emailLower === email) ??
+      conflictingUsers.find(
+        (candidate) => candidate.usernameLower === usernameLower,
+      );
 
     if (existingUser) {
       const duplicateIds = conflictingUsers
@@ -119,7 +129,7 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
 
     const filter = existingUser
       ? { _id: existingUser._id }
-      : { email: user.email };
+      : { emailLower: email };
 
     await UserModel.updateOne(
       filter,
@@ -127,7 +137,8 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
         $set: {
           avatarUrl: user.avatarUrl ?? '',
           bio: user.bio,
-          email: user.email,
+          email,
+          emailLower: email,
           isSuspended: false,
           notificationSettings: {
             comments: true,
@@ -145,7 +156,8 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
           showOnlineStatus: true,
           status: user.status,
           suspensionReason: '',
-          username: user.username,
+          username,
+          usernameLower,
         },
         $setOnInsert: {
           blockedUsers: [],
@@ -163,18 +175,20 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
     );
   }
 
-  const demoEmails = demoUsers.map((user) => user.email);
-  const demoUsernames = demoUsers.map((user) => user.username);
+  const demoEmails = demoUsers.map((user) => normalizeEmail(user.email));
+  const demoUsernames = demoUsers.map((user) =>
+    normalizeUsernameLower(user.username),
+  );
   const users = await UserModel.find({
     $or: [
-      { email: { $in: demoEmails } },
-      { username: { $in: demoUsernames } },
+      { emailLower: { $in: demoEmails } },
+      { usernameLower: { $in: demoUsernames } },
     ],
   }).exec();
-  const byEmail = new Map(users.map((user) => [user.email, user]));
+  const byEmail = new Map(users.map((user) => [user.emailLower, user]));
 
   for (const user of demoUsers) {
-    if (!byEmail.has(user.email)) {
+    if (!byEmail.has(normalizeEmail(user.email))) {
       throw new Error(`Failed to seed user ${user.email}`);
     }
   }
@@ -182,7 +196,7 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
   const adminSeed = demoUsers.find((user) => user.role === 'admin')!;
 
   return {
-    admin: byEmail.get(adminSeed.email)!,
+    admin: byEmail.get(normalizeEmail(adminSeed.email))!,
     casey: byEmail.get('casey@example.com')!,
     demo: byEmail.get('demo@example.com')!,
     moderator: byEmail.get('mod@example.com')!,
@@ -192,16 +206,21 @@ async function upsertDemoUsers(demoUsers: DemoUserSeed[]) {
 
 type DemoUsers = Awaited<ReturnType<typeof upsertDemoUsers>>;
 
-async function resetDemoRelationships(users: DemoUsers, demoUsers: DemoUserSeed[]) {
+async function resetDemoRelationships(
+  users: DemoUsers,
+  demoUsers: DemoUserSeed[],
+) {
   const UserModel = mongoose.model(User.name, UserSchema);
-  const demoEmails = demoUsers.map((user) => user.email);
-  const demoUsernames = demoUsers.map((user) => user.username);
+  const demoEmails = demoUsers.map((user) => normalizeEmail(user.email));
+  const demoUsernames = demoUsers.map((user) =>
+    normalizeUsernameLower(user.username),
+  );
 
   await UserModel.updateMany(
     {
       $or: [
-        { email: { $in: demoEmails } },
-        { username: { $in: demoUsernames } },
+        { emailLower: { $in: demoEmails } },
+        { usernameLower: { $in: demoUsernames } },
       ],
     },
     {
@@ -263,14 +282,16 @@ async function seedPostsAndReports(users: DemoUsers) {
         {
           _id: caseyCommentId,
           author: users.casey._id,
-          content: 'The optimistic updates feel fast. I would test rollback next.',
+          content:
+            'The optimistic updates feel fast. I would test rollback next.',
           hiddenBy: [],
           likedBy: [users.demo._id],
           replies: [
             {
               _id: demoReplyId,
               author: users.demo._id,
-              content: 'Good call. I added failure states to the demo checklist.',
+              content:
+                'Good call. I added failure states to the demo checklist.',
               hiddenBy: [],
               likedBy: [users.casey._id],
             },

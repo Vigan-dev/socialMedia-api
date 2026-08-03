@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -74,10 +75,16 @@ export class PostsController {
     return this.postsService.create(createPostDto, request.user!);
   }
 
-  @Post(':id/like')
+  @Put(':id/like')
   @UseGuards(JwtAuthGuard)
-  toggleLike(@Param('id') id: string, @Req() request: RequestWithUser) {
-    return this.postsService.toggleLike(id, request.user!);
+  like(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.setLike(id, request.user!, true);
+  }
+
+  @Delete(':id/like')
+  @UseGuards(JwtAuthGuard)
+  unlike(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.setLike(id, request.user!, false);
   }
 
   @Patch(':id')
@@ -122,17 +129,33 @@ export class PostsController {
     return this.postsService.addComment(id, createCommentDto, request.user!);
   }
 
-  @Post(':postId/comments/:commentId/like')
+  @Put(':postId/comments/:commentId/like')
   @UseGuards(JwtAuthGuard)
-  toggleCommentLike(
+  likeComment(
     @Param('postId') postId: string,
     @Param('commentId') commentId: string,
     @Req() request: RequestWithUser,
   ) {
-    return this.postsService.toggleCommentLike(
+    return this.postsService.setCommentLike(
       postId,
       commentId,
       request.user!,
+      true,
+    );
+  }
+
+  @Delete(':postId/comments/:commentId/like')
+  @UseGuards(JwtAuthGuard)
+  unlikeComment(
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.setCommentLike(
+      postId,
+      commentId,
+      request.user!,
+      false,
     );
   }
 
@@ -153,19 +176,37 @@ export class PostsController {
     );
   }
 
-  @Post(':postId/comments/:commentId/replies/:replyId/like')
+  @Put(':postId/comments/:commentId/replies/:replyId/like')
   @UseGuards(JwtAuthGuard)
-  toggleReplyLike(
+  likeReply(
     @Param('postId') postId: string,
     @Param('commentId') commentId: string,
     @Param('replyId') replyId: string,
     @Req() request: RequestWithUser,
   ) {
-    return this.postsService.toggleReplyLike(
+    return this.postsService.setReplyLike(
       postId,
       commentId,
       replyId,
       request.user!,
+      true,
+    );
+  }
+
+  @Delete(':postId/comments/:commentId/replies/:replyId/like')
+  @UseGuards(JwtAuthGuard)
+  unlikeReply(
+    @Param('postId') postId: string,
+    @Param('commentId') commentId: string,
+    @Param('replyId') replyId: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.setReplyLike(
+      postId,
+      commentId,
+      replyId,
+      request.user!,
+      false,
     );
   }
 }

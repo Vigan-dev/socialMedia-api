@@ -7,8 +7,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { NotificationsService } from '../notifications/notifications.service';
-import { User } from '../users/schemas/user.schema';
-import type { UserDocument } from '../users/schemas/user.schema';
+import { CommunicationPolicyService } from './communication-policy.service';
 import {
   Conversation,
   createConversationKey,
@@ -24,8 +23,19 @@ import {
   mapConversationDocumentToResponse,
   mapMessageDocumentToResponse,
 } from './conversation-response.mapper';
+import {
+  buildCursorPage,
+  decodeCursor,
+  encodeCursor,
+  parsePageLimit,
+} from '../common/pagination/cursor-pagination';
 
 const TYPING_TTL_MS = 6000;
+
+type ConversationPageQuery = {
+  cursor?: string;
+  limit?: string;
+};
 
 function isDuplicateKeyError(error: unknown) {
   return (
@@ -43,15 +53,28 @@ export class ConversationsService {
     private readonly conversationModel: Model<ConversationDocument>,
     @InjectModel(Message.name)
     private readonly messageModel: Model<MessageDocument>,
-    @InjectModel(User.name)
-    private readonly userModel: Model<UserDocument>,
+    private readonly communicationPolicyService: CommunicationPolicyService,
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async findForUser(userId: string): Promise<ConversationResponse[]> {
+  async findForUser(userId: string, query: ConversationPageQuery = {}) {
+    const limit = parsePageLimit(query.limit, 30, 50);
+    const cursor = this.decodeDateCursor('conversations', query.cursor);
+    const conversationFilter: Record<string, unknown> = {
+      participants: new Types.ObjectId(userId),
+    };
+
+    if (cursor) {
+      conversationFilter.$or = [
+        { updatedAt: { $lt: cursor.date } },
+        { updatedAt: cursor.date, _id: { $lt: cursor.id } },
+      ];
+    }
+
     const conversations = await this.conversationModel
-      .find({ participants: new Types.ObjectId(userId) })
-      .sort({ lastMessageAt: -1, updatedAt: -1 })
+      .find(conversationFilter)
+      .sort({ updatedAt: -1, _id: -1 })
+      .limit(limit + 1)
       .populate([
         {
           path: 'participants',
@@ -63,10 +86,19 @@ export class ConversationsService {
         },
       ])
       .exec();
-
-    return conversations.map((conversation) =>
-      mapConversationDocumentToResponse(conversation, userId),
+    const page = buildCursorPage(conversations, limit, (conversation) =>
+      encodeCursor('conversations', {
+        id: conversation._id.toString(),
+        sortValue: conversation.updatedAt.toISOString(),
+      }),
     );
+
+    return {
+      ...page,
+      items: page.items.map((conversation) =>
+        mapConversationDocumentToResponse(conversation, userId),
+      ),
+    };
   }
 
   async findOrCreate(
@@ -81,22 +113,10 @@ export class ConversationsService {
       throw new BadRequestException('You cannot message yourself');
     }
 
-    const targetUser = await this.userModel.findById(participantId);
-
-    if (!targetUser) {
-      throw new NotFoundException('User not found');
-    }
-
-    if (targetUser.privacy?.allowMessagesFrom === 'none') {
-      throw new ForbiddenException('This user is not accepting messages');
-    }
-
-    if (
-      targetUser.privacy?.allowMessagesFrom === 'following' &&
-      !targetUser.following?.some((id) => id.toString() === userId)
-    ) {
-      throw new ForbiddenException('Only followed users can message this user');
-    }
+    await this.communicationPolicyService.assertCanMessage(
+      userId,
+      participantId,
+    );
 
     const participantIds = [
       new Types.ObjectId(userId),
@@ -156,18 +176,41 @@ export class ConversationsService {
   async findMessages(
     userId: string,
     conversationId: string,
-  ): Promise<MessageResponse[]> {
+    query: ConversationPageQuery = {},
+  ) {
     await this.assertParticipant(userId, conversationId);
+    const limit = parsePageLimit(query.limit, 30, 50);
+    const cursor = this.decodeDateCursor('conversation-messages', query.cursor);
+    const messageFilter: Record<string, unknown> = {
+      conversation: new Types.ObjectId(conversationId),
+    };
+
+    if (cursor) {
+      messageFilter.$or = [
+        { createdAt: { $lt: cursor.date } },
+        { createdAt: cursor.date, _id: { $lt: cursor.id } },
+      ];
+    }
 
     const messages = await this.messageModel
-      .find({ conversation: new Types.ObjectId(conversationId) })
-      .sort({ createdAt: 1 })
+      .find(messageFilter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
       .populate('sender', 'username avatarUrl')
       .exec();
-
-    return messages.map((message) =>
-      mapMessageDocumentToResponse(message, userId),
+    const page = buildCursorPage(messages, limit, (message) =>
+      encodeCursor('conversation-messages', {
+        id: message._id.toString(),
+        sortValue: message.createdAt.toISOString(),
+      }),
     );
+
+    return {
+      ...page,
+      items: page.items.map((message) =>
+        mapMessageDocumentToResponse(message, userId),
+      ),
+    };
   }
 
   async sendMessage(
@@ -185,6 +228,15 @@ export class ConversationsService {
     const senderObjectId = new Types.ObjectId(userId);
     const recipientIds = conversation.participants.filter(
       (participantId) => participantId.toString() !== userId,
+    );
+
+    await Promise.all(
+      recipientIds.map((recipientId) =>
+        this.communicationPolicyService.assertCanMessage(
+          userId,
+          recipientId.toString(),
+        ),
+      ),
     );
 
     const message = await this.messageModel.create({
@@ -330,6 +382,22 @@ export class ConversationsService {
     ]);
 
     return mapConversationDocumentToResponse(populated, userId);
+  }
+
+  private decodeDateCursor(scope: string, cursor?: string) {
+    const boundary = decodeCursor(scope, cursor);
+
+    if (!boundary) {
+      return null;
+    }
+
+    const date = new Date(boundary.sortValue);
+
+    if (Number.isNaN(date.getTime()) || !Types.ObjectId.isValid(boundary.id)) {
+      throw new BadRequestException('Invalid pagination cursor');
+    }
+
+    return { date, id: new Types.ObjectId(boundary.id) };
   }
 
   private async assertParticipant(userId: string, conversationId: string) {

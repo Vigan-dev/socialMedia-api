@@ -11,16 +11,27 @@ import type {
   ProfileVisibility,
   UserStatus,
 } from '../user.constants';
+import {
+  normalizeEmail,
+  normalizeUsername,
+  normalizeUsernameLower,
+} from '../user-identity';
 
 export type UserDocument = HydratedDocument<User> & { _id: Types.ObjectId };
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true, trim: true })
   username!: string;
 
-  @Prop({ required: true, unique: true })
+  @Prop({ required: true })
+  usernameLower!: string;
+
+  @Prop({ required: true, trim: true })
   email!: string;
+
+  @Prop({ required: true })
+  emailLower!: string;
 
   @Prop({ required: true, select: false })
   password!: string;
@@ -121,3 +132,28 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+UserSchema.pre('validate', function normalizeCanonicalIdentity() {
+  if (this.email) {
+    this.email = normalizeEmail(this.email);
+    this.emailLower = this.email;
+  }
+
+  if (this.username) {
+    this.username = normalizeUsername(this.username);
+    this.usernameLower = normalizeUsernameLower(this.username);
+  }
+});
+
+UserSchema.index(
+  { emailLower: 1 },
+  { name: 'user_email_lower_unique', unique: true },
+);
+UserSchema.index(
+  { usernameLower: 1 },
+  { name: 'user_username_lower_unique', unique: true },
+);
+UserSchema.index({ blockedUsers: 1 });
+UserSchema.index({ followers: 1 });
+UserSchema.index({ following: 1 });
+UserSchema.index({ mutedUsers: 1 });

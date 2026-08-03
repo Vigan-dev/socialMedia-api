@@ -13,6 +13,8 @@ export type NotificationType =
 
 @Schema({ timestamps: true })
 export class Notification {
+  _id!: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: User.name, required: true, index: true })
   recipient!: Types.ObjectId;
 
@@ -33,8 +35,12 @@ export class Notification {
 
   @Prop({ default: false })
   read!: boolean;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
-NotificationSchema.index({ recipient: 1, createdAt: -1 });
+NotificationSchema.index({ recipient: 1, createdAt: -1, _id: -1 });

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User } from '../users/schemas/user.schema';
@@ -9,6 +9,13 @@ import type {
   NotificationType,
 } from './schemas/notification.schema';
 import type { NotificationResponse } from './dto/notification-response.dto';
+import { normalizeUsernameLower } from '../users/user-identity';
+import {
+  buildCursorPage,
+  decodeCursor,
+  encodeCursor,
+  parsePageLimit,
+} from '../common/pagination/cursor-pagination';
 
 type CreateNotificationInput = {
   actorId: string;
@@ -16,6 +23,11 @@ type CreateNotificationInput = {
   postId?: string;
   recipientId?: string;
   type: NotificationType;
+};
+
+type NotificationPageQuery = {
+  cursor?: string;
+  limit?: string;
 };
 
 type PopulatedUser = {
@@ -43,17 +55,51 @@ export class NotificationsService {
     private readonly userModel: Model<UserDocument>,
   ) {}
 
-  async findForUser(userId: string): Promise<NotificationResponse[]> {
+  async findForUser(userId: string, query: NotificationPageQuery = {}) {
+    const limit = parsePageLimit(query.limit, 30, 50);
+    const boundary = decodeCursor('notifications', query.cursor);
+    const notificationFilter: Record<string, unknown> = {
+      recipient: new Types.ObjectId(userId),
+    };
+
+    if (boundary) {
+      const createdAt = new Date(boundary.sortValue);
+
+      if (
+        Number.isNaN(createdAt.getTime()) ||
+        !Types.ObjectId.isValid(boundary.id)
+      ) {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+
+      notificationFilter.$or = [
+        { createdAt: { $lt: createdAt } },
+        {
+          createdAt,
+          _id: { $lt: new Types.ObjectId(boundary.id) },
+        },
+      ];
+    }
+
     const notifications = await this.notificationModel
-      .find({ recipient: new Types.ObjectId(userId) })
-      .sort({ createdAt: -1 })
-      .limit(50)
+      .find(notificationFilter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
       .populate<{ actor: PopulatedUser }>('actor', 'username avatarUrl')
       .exec();
-
-    return notifications.map((notification) =>
-      this.toResponse(notification.toObject() as NotificationWithActor),
+    const page = buildCursorPage(notifications, limit, (notification) =>
+      encodeCursor('notifications', {
+        id: notification._id.toString(),
+        sortValue: notification.createdAt.toISOString(),
+      }),
     );
+
+    return {
+      ...page,
+      items: page.items.map((notification) =>
+        this.toResponse(notification.toObject() as NotificationWithActor),
+      ),
+    };
   }
 
   async create(input: CreateNotificationInput) {
@@ -91,11 +137,7 @@ export class NotificationsService {
 
     const users = await this.userModel
       .find({
-        username: {
-          $in: usernames.map(
-            (username) => new RegExp(`^${this.escapeRegex(username)}$`, 'i'),
-          ),
-        },
+        usernameLower: { $in: usernames.map(normalizeUsernameLower) },
       })
       .exec();
 
@@ -122,7 +164,7 @@ export class NotificationsService {
     );
   }
 
-  async markAllRead(userId: string): Promise<NotificationResponse[]> {
+  async markAllRead(userId: string) {
     await this.notificationModel.updateMany(
       { recipient: new Types.ObjectId(userId), read: false },
       { read: true },
@@ -140,18 +182,14 @@ export class NotificationsService {
   }
 
   private extractMentionedUsernames(content: string) {
-    const matches = content.match(/@[\w.-]+/g) ?? [];
-    const normalized = matches.flatMap((match) => {
+    const matches: string[] = content.match(/@[\w.-]+/g) ?? [];
+    const normalized: string[] = matches.flatMap((match: string) => {
       const username = match.slice(1).trim().toLowerCase();
 
       return [username, username.replace(/_/g, ' ')];
     });
 
     return Array.from(new Set(normalized)).filter(Boolean);
-  }
-
-  private escapeRegex(value: string) {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   private toResponse(

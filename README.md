@@ -84,6 +84,17 @@ Install dependencies:
 npm install
 ```
 
+If the database already contains users created before canonical identity fields
+were introduced, run this once before starting the updated API:
+
+```bash
+npm run migrate:user-identities
+```
+
+The migration checks for case-insensitive email or username collisions before
+writing anything. If it finds a collision, it stops so the conflicting accounts
+can be reviewed manually.
+
 Start the API:
 
 ```bash
@@ -122,6 +133,7 @@ The admin account is created or updated from the `ADMIN_*` env variables on star
 npm run start:dev
 npm run build
 npm run start:prod
+npm run migrate:user-identities
 npm run seed:demo
 npm run lint
 npm test

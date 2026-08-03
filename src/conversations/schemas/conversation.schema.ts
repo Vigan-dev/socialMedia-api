@@ -15,6 +15,8 @@ export function createConversationKey(
 
 @Schema({ timestamps: true })
 export class Conversation {
+  _id!: Types.ObjectId;
+
   @Prop({ required: true })
   conversationKey!: string;
 
@@ -40,6 +42,10 @@ export class Conversation {
     default: [],
   })
   typing!: Array<{ user: Types.ObjectId; expiresAt: Date }>;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
@@ -57,4 +63,4 @@ ConversationSchema.index(
     unique: true,
   },
 );
-ConversationSchema.index({ participants: 1, updatedAt: -1 });
+ConversationSchema.index({ participants: 1, updatedAt: -1, _id: -1 });

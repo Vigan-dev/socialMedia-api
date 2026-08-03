@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -48,7 +49,11 @@ export class AiController {
   }
 
   @Get('support-chat')
-  getSessions(@Req() request: RequestWithUser) {
-    return this.aiService.getSessions(request.user!.id);
+  getSessions(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.aiService.getSessions(request.user!.id, { cursor, limit });
   }
 }

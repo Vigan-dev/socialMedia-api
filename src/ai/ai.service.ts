@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import type { PipelineStage } from 'mongoose';
 import {
   SupportChatMessage,
   SupportChatMessageDocument,
@@ -15,6 +16,12 @@ import {
   SupportChatConversation,
   SupportChatConversationDocument,
 } from './schemas/conversation.schema';
+import {
+  buildCursorPage,
+  decodeCursor,
+  encodeCursor,
+  parsePageLimit,
+} from '../common/pagination/cursor-pagination';
 
 type OllamaChatResponse = {
   message?: {
@@ -25,6 +32,11 @@ type OllamaChatResponse = {
 type OllamaChatMessage = {
   role: 'assistant' | 'system' | 'user';
   content: string;
+};
+
+type SupportSessionPageQuery = {
+  cursor?: string;
+  limit?: string;
 };
 
 @Injectable()
@@ -107,22 +119,58 @@ export class AiService {
       .exec();
   }
 
-  async getSessions(userId: string) {
-    const conversations = await this.supportChatConversationModel
-      .find({ userId })
-      .sort({ lastMessageAt: -1 })
-      .lean()
-      .exec();
+  async getSessions(userId: string, query: SupportSessionPageQuery = {}) {
+    const limit = parsePageLimit(query.limit, 20, 50);
+    const boundary = decodeCursor('support-sessions', query.cursor);
+    const cursorDate = boundary ? new Date(boundary.sortValue) : null;
 
-    if (conversations.length > 0) {
-      return conversations.map((conversation) => ({
-        _id: conversation.sessionId,
-        firstMessage: conversation.firstMessage,
-        lastMessageAt: conversation.lastMessageAt,
-      }));
+    if (cursorDate && Number.isNaN(cursorDate.getTime())) {
+      throw new BadRequestException('Invalid pagination cursor');
     }
 
-    return this.supportChatMessageModel.aggregate([
+    const hasConversationRecords = Boolean(
+      await this.supportChatConversationModel.exists({ userId }),
+    );
+
+    if (hasConversationRecords) {
+      if (boundary && !Types.ObjectId.isValid(boundary.id)) {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+
+      const filter: Record<string, unknown> = { userId };
+
+      if (boundary && cursorDate) {
+        const cursorId = new Types.ObjectId(boundary.id);
+        filter.$or = [
+          { lastMessageAt: { $lt: cursorDate } },
+          { lastMessageAt: cursorDate, _id: { $lt: cursorId } },
+        ];
+      }
+
+      const conversations = await this.supportChatConversationModel
+        .find(filter)
+        .sort({ lastMessageAt: -1, _id: -1 })
+        .limit(limit + 1)
+        .lean()
+        .exec();
+      const page = buildCursorPage(conversations, limit, (conversation) =>
+        encodeCursor('support-sessions', {
+          id: conversation._id.toString(),
+          sortValue: conversation.lastMessageAt.toISOString(),
+        }),
+      );
+
+      return {
+        ...page,
+        items: page.items.map((conversation) => ({
+          _id: conversation.sessionId,
+          firstMessage: conversation.firstMessage,
+          lastMessageAt: conversation.lastMessageAt,
+        })),
+      };
+    }
+
+    const aggregatePipeline: PipelineStage[] = [
       {
         $match: {
           userId,
@@ -130,7 +178,7 @@ export class AiService {
       },
       {
         $sort: {
-          createdAt: -1,
+          createdAt: 1,
         },
       },
       {
@@ -140,16 +188,45 @@ export class AiService {
             $first: '$userMessage',
           },
           lastMessageAt: {
-            $first: '$createdAt',
+            $max: '$createdAt',
           },
         },
       },
+    ];
+
+    if (boundary && cursorDate) {
+      aggregatePipeline.push({
+        $match: {
+          $or: [
+            { lastMessageAt: { $lt: cursorDate } },
+            { lastMessageAt: cursorDate, _id: { $lt: boundary.id } },
+          ],
+        },
+      });
+    }
+
+    aggregatePipeline.push(
       {
         $sort: {
           lastMessageAt: -1,
+          _id: -1,
         },
       },
-    ]);
+      { $limit: limit + 1 },
+    );
+
+    const sessions = await this.supportChatMessageModel.aggregate<{
+      _id: string;
+      firstMessage: string;
+      lastMessageAt: Date;
+    }>(aggregatePipeline);
+
+    return buildCursorPage(sessions, limit, (session) =>
+      encodeCursor('support-sessions', {
+        id: session._id,
+        sortValue: session.lastMessageAt.toISOString(),
+      }),
+    );
   }
 
   private async getOllamaHistory(

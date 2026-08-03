@@ -223,7 +223,7 @@ describe('UsersService relationships', () => {
     expect(userModel.findOne).toHaveBeenCalledWith({
       isSuspended: false,
       profileVisibility: { $ne: 'private' },
-      username: expect.any(RegExp),
+      usernameLower: 'target user',
     });
   });
 
