@@ -58,9 +58,7 @@ describe('UsersService relationships', () => {
     const currentObjectId = new Types.ObjectId(currentUserId);
     const targetObjectId = new Types.ObjectId(targetUserId);
 
-    userModel.updateOne
-      .mockResolvedValueOnce({ modifiedCount: 0 })
-      .mockResolvedValue({ modifiedCount: 1 });
+    userModel.updateOne.mockResolvedValue({ modifiedCount: 1 });
     userModel.findById.mockResolvedValue({
       _id: targetObjectId,
       avatarUrl: '',
@@ -73,7 +71,7 @@ describe('UsersService relationships', () => {
     });
 
     await expect(
-      service.toggleFollow(currentUserId, targetUserId),
+      service.setFollow(currentUserId, targetUserId, true),
     ).resolves.toEqual(
       expect.objectContaining({
         id: targetUserId,
@@ -83,12 +81,12 @@ describe('UsersService relationships', () => {
     );
 
     expect(userModel.updateOne).toHaveBeenNthCalledWith(
-      2,
+      1,
       { _id: currentObjectId },
       { $addToSet: { following: targetObjectId } },
     );
     expect(userModel.updateOne).toHaveBeenNthCalledWith(
-      3,
+      2,
       { _id: targetObjectId },
       { $addToSet: { followers: currentObjectId } },
     );
@@ -115,11 +113,38 @@ describe('UsersService relationships', () => {
     });
 
     await expect(
-      service.toggleFollow(currentUserId, targetUserId),
+      service.setFollow(currentUserId, targetUserId, false),
     ).resolves.toEqual(expect.objectContaining({ isFollowing: false }));
 
     expect(userModel.updateOne).toHaveBeenCalledTimes(2);
     expect(notificationsService.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps repeated follow requests idempotent and avoids duplicate notifications', async () => {
+    const currentObjectId = new Types.ObjectId(currentUserId);
+    const targetObjectId = new Types.ObjectId(targetUserId);
+
+    userModel.updateOne
+      .mockResolvedValueOnce({ modifiedCount: 1 })
+      .mockResolvedValueOnce({ modifiedCount: 1 })
+      .mockResolvedValueOnce({ modifiedCount: 0 })
+      .mockResolvedValueOnce({ modifiedCount: 0 });
+    userModel.findById.mockResolvedValue({
+      _id: targetObjectId,
+      avatarUrl: '',
+      followers: [currentObjectId],
+      following: [],
+      role: 'user',
+      showOnlineStatus: true,
+      status: 'available',
+      username: 'Target User',
+    });
+
+    await service.setFollow(currentUserId, targetUserId, true);
+    await service.setFollow(currentUserId, targetUserId, true);
+
+    expect(userModel.updateOne).toHaveBeenCalledTimes(4);
+    expect(notificationsService.create).toHaveBeenCalledTimes(1);
   });
 
   it('blocks a user and removes both follow relationships', async () => {
@@ -169,7 +194,7 @@ describe('UsersService relationships', () => {
     );
 
     await expect(
-      service.toggleFollow(currentUserId, currentUserId),
+      service.setFollow(currentUserId, currentUserId, true),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       service.blockUser(currentUserId, currentUserId),
@@ -185,7 +210,7 @@ describe('UsersService relationships', () => {
     );
 
     await expect(
-      service.toggleFollow(currentUserId, targetUserId),
+      service.setFollow(currentUserId, targetUserId, true),
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
       service.blockUser(currentUserId, targetUserId),
