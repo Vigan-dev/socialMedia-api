@@ -499,9 +499,10 @@ export class UsersService {
     return this.userResponseMapper.toProfile(user);
   }
 
-  async toggleFollow(
+  async setFollow(
     currentUserId: string,
     targetUserId: string,
+    shouldFollow: boolean,
   ): Promise<NetworkUserResponse> {
     const { currentObjectId, targetObjectId } =
       await this.relationshipService.assertRelationshipTarget(
@@ -511,31 +512,22 @@ export class UsersService {
         { requireCurrentUser: true },
       );
 
-    const unfollowResult = await this.userModel.updateOne(
-      { _id: currentObjectId, following: targetObjectId },
-      { $pull: { following: targetObjectId } },
-    );
-
-    const didUnfollow = unfollowResult.modifiedCount > 0;
-
-    if (didUnfollow) {
-      await this.userModel.updateOne(
+    const [currentUserUpdate] = await Promise.all([
+      this.userModel.updateOne(
+        { _id: currentObjectId },
+        shouldFollow
+          ? { $addToSet: { following: targetObjectId } }
+          : { $pull: { following: targetObjectId } },
+      ),
+      this.userModel.updateOne(
         { _id: targetObjectId },
-        { $pull: { followers: currentObjectId } },
-      );
-    }
+        shouldFollow
+          ? { $addToSet: { followers: currentObjectId } }
+          : { $pull: { followers: currentObjectId } },
+      ),
+    ]);
 
-    if (!didUnfollow) {
-      await Promise.all([
-        this.userModel.updateOne(
-          { _id: currentObjectId },
-          { $addToSet: { following: targetObjectId } },
-        ),
-        this.userModel.updateOne(
-          { _id: targetObjectId },
-          { $addToSet: { followers: currentObjectId } },
-        ),
-      ]);
+    if (shouldFollow && currentUserUpdate.modifiedCount > 0) {
       await this.notificationsService.create({
         actorId: currentUserId,
         recipientId: targetUserId,
