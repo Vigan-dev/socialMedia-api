@@ -150,6 +150,15 @@ export class PostsService {
     const hiddenAuthorObjectIds = [...hiddenAuthorIds]
       .filter((id) => Types.ObjectId.isValid(id))
       .map((id) => new Types.ObjectId(id));
+    const inaccessibleAuthorIds = await this.findInaccessibleAuthorIds(userId);
+    const excludedAuthorIds = Array.from(
+      new Map(
+        [...hiddenAuthorObjectIds, ...inaccessibleAuthorIds].map((id) => [
+          id.toString(),
+          id,
+        ]),
+      ).values(),
+    );
     const authorFilter: Record<string, Types.ObjectId[]> = {};
 
     if (cursor?.id) {
@@ -165,8 +174,8 @@ export class PostsService {
       authorFilter.$in = visibility?.followingIds ?? [];
     }
 
-    if (hiddenAuthorObjectIds.length > 0) {
-      authorFilter.$nin = hiddenAuthorObjectIds;
+    if (excludedAuthorIds.length > 0) {
+      authorFilter.$nin = excludedAuthorIds;
     }
 
     if (Object.keys(authorFilter).length > 0) {
@@ -179,13 +188,19 @@ export class PostsService {
       .limit(queryLimit)
       .populate<{
         author: PopulatedAuthor;
-      }>('author', 'username email avatarUrl followers')
+      }>(
+        'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
       .populate<{
         comments: PopulatedComment[];
-      }>('comments.author', 'username email isSuspended profileVisibility')
+      }>(
+        'comments.author',
+        'username email followers isSuspended profileVisibility',
+      )
       .populate(
         'comments.replies.author',
-        'username email isSuspended profileVisibility',
+        'username email followers isSuspended profileVisibility',
       )
       .exec();
 
@@ -239,13 +254,16 @@ export class PostsService {
     const author = await this.userModel
       .findOne({
         isSuspended: false,
-        profileVisibility: { $ne: 'private' },
         usernameLower: normalizeUsernameLower(username),
       })
-      .select('_id');
+      .select('_id followers isSuspended profileVisibility');
 
     if (!author || visibility.hiddenAuthorIds.has(author._id.toString())) {
       throw new NotFoundException('User not found');
+    }
+
+    if (!this.canViewUserContent(author, viewerId)) {
+      return [];
     }
 
     const posts = await this.postModel
@@ -263,10 +281,13 @@ export class PostsService {
       )
       .populate<{
         comments: PopulatedComment[];
-      }>('comments.author', 'username email isSuspended profileVisibility')
+      }>(
+        'comments.author',
+        'username email followers isSuspended profileVisibility',
+      )
       .populate(
         'comments.replies.author',
-        'username email isSuspended profileVisibility',
+        'username email followers isSuspended profileVisibility',
       )
       .exec();
 
@@ -303,9 +324,19 @@ export class PostsService {
     });
 
     const populatedPost = await post.populate([
-      { path: 'author', select: 'username email avatarUrl followers' },
-      { path: 'comments.author', select: 'username email' },
-      { path: 'comments.replies.author', select: 'username email' },
+      {
+        path: 'author',
+        select:
+          'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.replies.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
     ]);
 
     await this.notificationsService.createMentions({
@@ -329,6 +360,8 @@ export class PostsService {
       throw new BadRequestException('Invalid post id');
     }
 
+    await this.findAccessiblePostOrThrow(postId, user.id);
+
     const userObjectId = new Types.ObjectId(user.id);
     const postObjectId = new Types.ObjectId(postId);
     const updateResult = await this.postModel.updateOne(
@@ -342,11 +375,7 @@ export class PostsService {
       throw new NotFoundException('Post not found');
     }
 
-    const post = await this.postModel.findById(postId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
+    const post = await this.findPostOrThrow(postId);
 
     if (shouldLike && updateResult.modifiedCount > 0) {
       await this.notificationsService.create({
@@ -359,7 +388,7 @@ export class PostsService {
 
     const populatedPost = await post.populate<{ author: PopulatedAuthor }>(
       'author',
-      'username email avatarUrl followers',
+      'username email avatarUrl followers isSuspended profileVisibility',
     );
 
     return this.postFeedMapper.toFeedPost(
@@ -377,11 +406,7 @@ export class PostsService {
       throw new BadRequestException('Invalid post id');
     }
 
-    const post = await this.postModel.findById(postId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
+    const post = await this.findPostOrThrow(postId);
 
     if (post.author.toString() !== user.id) {
       throw new ForbiddenException('You can only edit your own posts');
@@ -420,9 +445,19 @@ export class PostsService {
     await post.save();
 
     const populatedPost = await post.populate([
-      { path: 'author', select: 'username email avatarUrl followers' },
-      { path: 'comments.author', select: 'username email' },
-      { path: 'comments.replies.author', select: 'username email' },
+      {
+        path: 'author',
+        select:
+          'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.replies.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
     ]);
 
     return this.postFeedMapper.toFeedPost(
@@ -436,11 +471,7 @@ export class PostsService {
       throw new BadRequestException('Invalid post id');
     }
 
-    const post = await this.postModel.findById(postId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
+    const post = await this.findPostOrThrow(postId);
 
     if (post.author.toString() !== user.id) {
       throw new ForbiddenException('You can only delete your own posts');
@@ -502,11 +533,7 @@ export class PostsService {
       );
     }
 
-    const post = await this.postModel.findById(postId);
-
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
+    const post = await this.findAccessiblePostOrThrow(postId, user.id);
 
     post.comments = post.comments ?? [];
     post.comments.push({
@@ -536,9 +563,19 @@ export class PostsService {
     });
 
     const populatedPost = await post.populate([
-      { path: 'author', select: 'username email avatarUrl followers' },
-      { path: 'comments.author', select: 'username email' },
-      { path: 'comments.replies.author', select: 'username email' },
+      {
+        path: 'author',
+        select:
+          'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.replies.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
     ]);
 
     return this.postFeedMapper.toFeedPost(
@@ -561,6 +598,10 @@ export class PostsService {
       throw new BadRequestException('Invalid comment id');
     }
 
+    const accessiblePost = await this.findAccessiblePostOrThrow(
+      postId,
+      user.id,
+    );
     const userObjectId = new Types.ObjectId(user.id);
     const commentObjectId = new Types.ObjectId(commentId);
     const updateResult = await this.postModel.updateOne(
@@ -572,8 +613,7 @@ export class PostsService {
     );
 
     if (updateResult.matchedCount === 0) {
-      const post = await this.findPostOrThrow(postId);
-      this.findCommentOrThrow(post, commentId);
+      this.findCommentOrThrow(accessiblePost, commentId);
     }
 
     const post = await this.findPostOrThrow(postId);
@@ -598,7 +638,7 @@ export class PostsService {
       );
     }
 
-    const post = await this.findPostOrThrow(postId);
+    const post = await this.findAccessiblePostOrThrow(postId, user.id);
     const comment = this.findCommentOrThrow(post, commentId);
     comment.replies = comment.replies ?? [];
     comment.replies.push({
@@ -648,6 +688,10 @@ export class PostsService {
       throw new BadRequestException('Invalid reply id');
     }
 
+    const accessiblePost = await this.findAccessiblePostOrThrow(
+      postId,
+      user.id,
+    );
     const userObjectId = new Types.ObjectId(user.id);
     const commentObjectId = new Types.ObjectId(commentId);
     const replyObjectId = new Types.ObjectId(replyId);
@@ -681,8 +725,7 @@ export class PostsService {
     );
 
     if (updateResult.matchedCount === 0) {
-      const post = await this.findPostOrThrow(postId);
-      const comment = this.findCommentOrThrow(post, commentId);
+      const comment = this.findCommentOrThrow(accessiblePost, commentId);
       this.findReplyOrThrow(comment, replyId);
     }
 
@@ -698,6 +741,33 @@ export class PostsService {
     const post = await this.postModel.findById(postId);
 
     if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    return post;
+  }
+
+  private async findAccessiblePostOrThrow(postId: string, viewerId: string) {
+    const post = await this.findPostOrThrow(postId);
+    const viewerObjectId = new Types.ObjectId(viewerId);
+
+    if (
+      post.isArchived ||
+      post.isHidden ||
+      (post.hiddenBy ?? []).some((id) => id.equals(viewerObjectId))
+    ) {
+      throw new NotFoundException('Post not found');
+    }
+
+    const author = await this.userModel.findById(post.author);
+    const hiddenUserIds =
+      await this.relationshipService.getHiddenUserIds(viewerId);
+
+    if (
+      !author ||
+      !this.canViewUserContent(author, viewerId) ||
+      hiddenUserIds.has(author._id.toString())
+    ) {
       throw new NotFoundException('Post not found');
     }
 
@@ -723,10 +793,13 @@ export class PostsService {
       )
       .populate<{
         comments: PopulatedComment[];
-      }>('comments.author', 'username email isSuspended profileVisibility')
+      }>(
+        'comments.author',
+        'username email followers isSuspended profileVisibility',
+      )
       .populate(
         'comments.replies.author',
-        'username email isSuspended profileVisibility',
+        'username email followers isSuspended profileVisibility',
       )
       .exec();
 
@@ -739,8 +812,10 @@ export class PostsService {
 
     if (
       !feedPost.author ||
-      feedPost.author.isSuspended ||
-      feedPost.author.profileVisibility === 'private' ||
+      !this.canViewUserContent(
+        feedPost.author,
+        visibility.viewerObjectId?.toString(),
+      ) ||
       visibility.hiddenAuthorIds.has(authorId ?? '')
     ) {
       throw new NotFoundException('Post not found');
@@ -808,9 +883,19 @@ export class PostsService {
 
   private async populateAndMap(post: PostDocument, userId?: string) {
     const populatedPost = await post.populate([
-      { path: 'author', select: 'username email avatarUrl followers' },
-      { path: 'comments.author', select: 'username email' },
-      { path: 'comments.replies.author', select: 'username email' },
+      {
+        path: 'author',
+        select:
+          'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
+      {
+        path: 'comments.replies.author',
+        select: 'username email followers isSuspended profileVisibility',
+      },
     ]);
 
     return this.postFeedMapper.toFeedPost(
@@ -841,5 +926,47 @@ export class PostsService {
       isArchived: { $ne: true },
       isHidden: { $ne: true },
     };
+  }
+
+  private canViewUserContent(
+    author: {
+      _id: Types.ObjectId;
+      followers?: Types.ObjectId[];
+      isSuspended?: boolean;
+      profileVisibility?: 'public' | 'private';
+    },
+    viewerId?: string,
+  ) {
+    if (author.isSuspended) return false;
+    if (author.profileVisibility !== 'private') return true;
+    if (!viewerId) return false;
+
+    return (
+      author._id.toString() === viewerId ||
+      (author.followers ?? []).some(
+        (followerId) => followerId.toString() === viewerId,
+      )
+    );
+  }
+
+  private async findInaccessibleAuthorIds(viewerId?: string) {
+    const viewerObjectId = viewerId ? new Types.ObjectId(viewerId) : undefined;
+    const privateAuthorFilter: Record<string, unknown> = {
+      profileVisibility: 'private',
+    };
+
+    if (viewerObjectId) {
+      privateAuthorFilter._id = { $ne: viewerObjectId };
+      privateAuthorFilter.followers = { $ne: viewerObjectId };
+    }
+
+    const authors = await this.userModel
+      .find({
+        $or: [{ isSuspended: true }, privateAuthorFilter],
+      })
+      .select('_id')
+      .exec();
+
+    return authors.map((author) => author._id);
   }
 }

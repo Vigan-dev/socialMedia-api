@@ -12,6 +12,10 @@ describe('PostsService feed pagination', () => {
   };
   let relationshipService: { getViewerVisibility: jest.Mock };
   let service: PostsService;
+  let userQuery: {
+    exec: jest.Mock;
+    select: jest.Mock;
+  };
 
   const authorId = new Types.ObjectId();
   const viewerId = new Types.ObjectId();
@@ -53,10 +57,14 @@ describe('PostsService feed pagination', () => {
         hiddenUserIds: new Set<string>(),
       }),
     };
+    userQuery = {
+      exec: jest.fn().mockResolvedValue([]),
+      select: jest.fn().mockReturnThis(),
+    };
 
     service = new PostsService(
       postModel as never,
-      {} as never,
+      { find: jest.fn().mockReturnValue(userQuery) } as never,
       {} as never,
       relationshipService as never,
       {
@@ -68,6 +76,18 @@ describe('PostsService feed pagination', () => {
       {} as never,
       {} as never,
     );
+  });
+
+  it('excludes private authors unless the viewer already follows them', async () => {
+    const privateAuthorId = new Types.ObjectId();
+    userQuery.exec.mockResolvedValue([{ _id: privateAuthorId }]);
+
+    await service.findAll(viewerId.toString());
+
+    expect(postModel.find).toHaveBeenCalledWith({
+      author: { $nin: [privateAuthorId] },
+      hiddenBy: { $ne: viewerId },
+    });
   });
 
   it('excludes hidden authors in MongoDB before applying the page limit', async () => {

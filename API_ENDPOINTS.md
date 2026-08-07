@@ -49,15 +49,18 @@ All user endpoints require authentication.
 | `GET`    | `/users/me`                                   | Get the current user profile.                                                    |
 | `GET`    | `/users/me/followers?limit=30&cursor=...`     | Get the current user's followers as a cursor page.                               |
 | `GET`    | `/users/me/following?limit=30&cursor=...`     | Get users followed by the current user as a cursor page.                         |
+| `GET`    | `/users/me/follow-requests?limit=30&cursor=...` | Get pending incoming follow requests as a cursor page.                         |
 | `GET`    | `/users/suggestions`                          | Get up to five suggested users ranked in MongoDB by follower count and username. |
 | `GET`    | `/users/username-availability?username=value` | Check username availability.                                                     |
 | `PATCH`  | `/users/me`                                   | Update profile fields such as username, bio, and uploaded avatar URL.            |
 | `PATCH`  | `/users/avatar`                               | Update uploaded avatar URL.                                                      |
 | `PATCH`  | `/users/status`                               | Update user status.                                                              |
-| `PATCH`  | `/users/privacy`                              | Update message, mention, and online-status privacy settings.                     |
+| `PATCH`  | `/users/privacy`                              | Update profile visibility, message, mention, and online-status privacy settings. |
 | `PATCH`  | `/users/notification-settings`                | Update notification preferences.                                                 |
-| `PUT`    | `/users/:id/follow`                           | Ensure the current user follows this user. Idempotent.                           |
-| `DELETE` | `/users/:id/follow`                           | Ensure the current user does not follow this user. Idempotent.                   |
+| `PUT`    | `/users/follow-requests/:id`                  | Accept a pending request from the identified user.                               |
+| `DELETE` | `/users/follow-requests/:id`                  | Decline a pending request from the identified user.                              |
+| `PUT`    | `/users/:id/follow`                           | Follow a public user or request access to a private account. Idempotent.          |
+| `DELETE` | `/users/:id/follow`                           | Unfollow a user or cancel a pending request. Idempotent.                         |
 | `POST`   | `/users/:id/block`                            | Block a user.                                                                    |
 | `DELETE` | `/users/:id/block`                            | Unblock a user.                                                                  |
 | `POST`   | `/users/:id/mute`                             | Mute a user.                                                                     |

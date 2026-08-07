@@ -25,6 +25,7 @@ export class UserResponseMapper {
         mentions: user.notificationSettings?.mentions ?? true,
         messages: user.notificationSettings?.messages ?? true,
       },
+      profileVisibility: user.profileVisibility ?? 'public',
       privacy: {
         allowMessagesFrom: user.privacy?.allowMessagesFrom ?? 'everyone',
         allowMentionsFrom: user.privacy?.allowMentionsFrom ?? 'everyone',
@@ -51,10 +52,24 @@ export class UserResponseMapper {
       isFollowing: currentUserId
         ? (user.followers ?? []).some((id) => id.toString() === currentUserId)
         : false,
+      isFollowRequested: currentUserId
+        ? (user.followRequests ?? []).some(
+            (id) => id.toString() === currentUserId,
+          )
+        : false,
+      profileVisibility: user.profileVisibility ?? 'public',
     };
   }
 
-  toPublicProfile(user: UserDocument): PublicUserProfileResponse {
+  toPublicProfile(
+    user: UserDocument,
+    currentUserId?: string,
+  ): PublicUserProfileResponse {
+    const isFollowing = currentUserId
+      ? (user.followers ?? []).some((id) => id.toString() === currentUserId)
+      : false;
+    const profileVisibility = user.profileVisibility ?? 'public';
+
     return {
       id: this.getUserId(user),
       name: user.username,
@@ -62,8 +77,19 @@ export class UserResponseMapper {
       role: user.role,
       avatarUrl: user.avatarUrl || null,
       bio: user.bio ?? '',
+      canViewContent:
+        profileVisibility === 'public' ||
+        this.getUserId(user) === currentUserId ||
+        isFollowing,
       followersCount: (user.followers ?? []).length,
       followingCount: (user.following ?? []).length,
+      isFollowing,
+      isFollowRequested: currentUserId
+        ? (user.followRequests ?? []).some(
+            (id) => id.toString() === currentUserId,
+          )
+        : false,
+      profileVisibility,
       status:
         user.showOnlineStatus === false ? null : (user.status ?? 'available'),
     };

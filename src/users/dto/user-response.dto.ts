@@ -1,4 +1,8 @@
-import type { MessagePrivacy, UserStatus } from '../user.constants';
+import type {
+  MessagePrivacy,
+  ProfileVisibility,
+  UserStatus,
+} from '../user.constants';
 
 export type NotificationSettingsResponse = {
   comments: boolean;
@@ -16,6 +20,7 @@ export type UserProfileResponse = {
   followingCount: number;
   id: string;
   notificationSettings: NotificationSettingsResponse;
+  profileVisibility: ProfileVisibility;
   privacy: {
     allowMessagesFrom: MessagePrivacy;
     allowMentionsFrom: MessagePrivacy;
@@ -33,7 +38,9 @@ export type NetworkUserResponse = {
   handle: string;
   id: string;
   isFollowing: boolean;
+  isFollowRequested: boolean;
   name: string;
+  profileVisibility: ProfileVisibility;
   role: string;
   status: UserStatus | null;
 };
@@ -41,11 +48,15 @@ export type NetworkUserResponse = {
 export type PublicUserProfileResponse = {
   avatarUrl: string | null;
   bio: string;
+  canViewContent: boolean;
   followersCount: number;
   followingCount: number;
   handle: string;
   id: string;
+  isFollowing: boolean;
+  isFollowRequested: boolean;
   name: string;
+  profileVisibility: ProfileVisibility;
   role: string;
   status: UserStatus | null;
 };

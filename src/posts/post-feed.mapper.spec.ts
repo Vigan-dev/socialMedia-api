@@ -162,6 +162,48 @@ describe('PostFeedMapper', () => {
     expect(response.commentItems?.[0].replies).toEqual([]);
   });
 
+  it('shows private-account comments to accepted followers', () => {
+    const viewerId = new Types.ObjectId();
+    const authorId = new Types.ObjectId();
+    const createdAt = new Date('2026-06-15T10:00:00.000Z');
+
+    const response = mapper.toFeedPost(
+      {
+        _id: new Types.ObjectId(),
+        author: {
+          _id: authorId,
+          email: 'author@example.com',
+          username: 'Author',
+        },
+        comments: [
+          {
+            _id: new Types.ObjectId(),
+            author: {
+              _id: new Types.ObjectId(),
+              email: 'private@example.com',
+              followers: [viewerId],
+              profileVisibility: 'private',
+              username: 'Private Commenter',
+            },
+            content: 'Follower-only comment',
+            createdAt,
+            hiddenBy: [],
+            likedBy: [],
+            replies: [],
+          },
+        ],
+        commentsCount: 1,
+        content: 'Post',
+        createdAt,
+        likedBy: [],
+      } satisfies PostWithAuthor,
+      viewerId.toString(),
+    );
+
+    expect(response.commentItems).toHaveLength(1);
+    expect(response.commentItems[0].content).toBe('Follower-only comment');
+  });
+
   it('maps public posts without internal or viewer-specific fields', () => {
     const viewerId = new Types.ObjectId();
     const authorId = new Types.ObjectId();

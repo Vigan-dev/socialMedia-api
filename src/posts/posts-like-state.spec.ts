@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
 import { PostsService } from './posts.service';
@@ -14,6 +15,14 @@ describe('PostsService desired like state', () => {
     updateOne: jest.Mock;
   };
   let notificationsService: { create: jest.Mock };
+  let relationshipService: { getHiddenUserIds: jest.Mock };
+  let userModel: { findById: jest.Mock };
+  let authorDocument: {
+    _id: Types.ObjectId;
+    followers: Types.ObjectId[];
+    isSuspended: boolean;
+    profileVisibility: 'public' | 'private';
+  };
   let postDocument: {
     author: Types.ObjectId;
     populate: jest.Mock;
@@ -47,12 +56,22 @@ describe('PostsService desired like state', () => {
       updateOne: jest.fn(),
     };
     notificationsService = { create: jest.fn() };
+    authorDocument = {
+      _id: authorId,
+      followers: [],
+      isSuspended: false,
+      profileVisibility: 'public',
+    };
+    userModel = { findById: jest.fn().mockResolvedValue(authorDocument) };
+    relationshipService = {
+      getHiddenUserIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
 
     service = new PostsService(
       postModel as never,
-      {} as never,
+      userModel as never,
       notificationsService as never,
-      {} as never,
+      relationshipService as never,
       {
         toFeedPost: jest.fn(() => ({
           id: postId,
@@ -63,6 +82,16 @@ describe('PostsService desired like state', () => {
       {} as never,
       { get: jest.fn() } as never,
     );
+  });
+
+  it('rejects engagement with a private post from a non-follower', async () => {
+    authorDocument.profileVisibility = 'private';
+
+    await expect(
+      service.setLike(postId, { id: userId }, true),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(postModel.updateOne).not.toHaveBeenCalled();
   });
 
   it('keeps repeated like requests idempotent and notifies once', async () => {

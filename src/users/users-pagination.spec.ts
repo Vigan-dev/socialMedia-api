@@ -84,6 +84,7 @@ describe('UsersService pagination and suggestions', () => {
       {
         $match: {
           _id: { $nin: [viewerId, followedUserId, hiddenUserId] },
+          followRequests: { $ne: viewerId },
         },
       },
       {

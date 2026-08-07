@@ -7,6 +7,8 @@ export type NotificationDocument = HydratedDocument<Notification>;
 export type NotificationType =
   | 'comment'
   | 'follow'
+  | 'follow_accept'
+  | 'follow_request'
   | 'like'
   | 'mention'
   | 'message';
@@ -22,7 +24,15 @@ export class Notification {
   actor!: Types.ObjectId;
 
   @Prop({
-    enum: ['like', 'comment', 'follow', 'mention', 'message'],
+    enum: [
+      'like',
+      'comment',
+      'follow',
+      'follow_accept',
+      'follow_request',
+      'mention',
+      'message',
+    ],
     required: true,
   })
   type!: NotificationType;

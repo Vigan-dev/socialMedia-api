@@ -10,7 +10,7 @@ This service powers the Next.js frontend, stores data in MongoDB, and exposes RE
 - Login, register, refresh, logout, forgot password, and reset password
 - One-time password reset tokens
 - User profiles, avatars, status, privacy, and notification settings
-- Follow, block, mute, followers, following, and user suggestions
+- Public/private accounts, follow requests, block, mute, and user suggestions
 - Posts, likes, comments, replies, hiding, and feed visibility filtering
 - Reporting for posts, comments, and users
 - Moderator report queue

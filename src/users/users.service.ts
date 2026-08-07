@@ -19,7 +19,11 @@ import type {
   UserProfileResponse,
 } from './dto/user-response.dto';
 import { UserResponseMapper } from './user-response.mapper';
-import type { MessagePrivacy, UserStatus } from './user.constants';
+import type {
+  MessagePrivacy,
+  ProfileVisibility,
+  UserStatus,
+} from './user.constants';
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 import {
   getDuplicateIdentityField,
@@ -272,19 +276,48 @@ export class UsersService {
     });
   }
 
+  async findFollowRequests(userId: string, query: UserPageQuery = {}) {
+    const user = await this.userModel.findById(userId).select('followRequests');
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const hiddenUserIds =
+      await this.relationshipService.getHiddenUserIds(userId);
+
+    return this.findNetworkUserPage({
+      currentUserId: userId,
+      filter: {
+        _id: {
+          $in: user.followRequests ?? [],
+          $nin: this.toObjectIds(hiddenUserIds),
+        },
+      },
+      query,
+      scope: 'user-follow-requests',
+    });
+  }
+
   async findSuggestedUsers(userId: string): Promise<NetworkUserResponse[]> {
+    const viewerObjectId = new Types.ObjectId(userId);
     const visibility = await this.relationshipService.getViewerVisibility(
       userId,
       { requireViewer: true },
     );
     const excludedIds = [
-      new Types.ObjectId(userId),
+      viewerObjectId,
       ...visibility.followingIds,
       ...this.toObjectIds(visibility.hiddenUserIds),
     ];
     const candidates = await this.userModel
       .aggregate<UserDocument>([
-        { $match: { _id: { $nin: excludedIds } } },
+        {
+          $match: {
+            _id: { $nin: excludedIds },
+            followRequests: { $ne: viewerObjectId },
+          },
+        },
         {
           $addFields: {
             suggestionFollowerCount: {
@@ -322,7 +355,6 @@ export class UsersService {
       : new Set<string>();
     const user = await this.userModel.findOne({
       isSuspended: false,
-      profileVisibility: { $ne: 'private' },
       usernameLower: normalizeUsernameLower(username),
     });
 
@@ -330,7 +362,7 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    return this.userResponseMapper.toPublicProfile(user);
+    return this.userResponseMapper.toPublicProfile(user, viewerId);
   }
 
   async updateProfile(
@@ -413,6 +445,7 @@ export class UsersService {
     data: {
       allowMessagesFrom?: MessagePrivacy;
       allowMentionsFrom?: MessagePrivacy;
+      profileVisibility?: ProfileVisibility;
       showOnlineStatus?: boolean;
     },
   ): Promise<UserProfileResponse> {
@@ -428,6 +461,10 @@ export class UsersService {
 
     if (data.showOnlineStatus !== undefined) {
       update.showOnlineStatus = Boolean(data.showOnlineStatus);
+    }
+
+    if (data.profileVisibility !== undefined) {
+      update.profileVisibility = data.profileVisibility;
     }
 
     const user = await this.userModel.findByIdAndUpdate(userId, update, {
@@ -512,6 +549,53 @@ export class UsersService {
         { requireCurrentUser: true },
       );
 
+    const hiddenUserIds =
+      await this.relationshipService.getHiddenUserIds(currentUserId);
+
+    if (hiddenUserIds.has(targetUserId)) {
+      throw new NotFoundException('User not found');
+    }
+
+    const targetUser = await this.userModel.findById(targetObjectId);
+
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isAlreadyFollowing = (targetUser.followers ?? []).some(
+      (followerId) => followerId.toString() === currentUserId,
+    );
+
+    if (
+      shouldFollow &&
+      targetUser.profileVisibility === 'private' &&
+      !isAlreadyFollowing
+    ) {
+      const requestUpdate = await this.userModel.updateOne(
+        { _id: targetObjectId, followers: { $ne: currentObjectId } },
+        { $addToSet: { followRequests: currentObjectId } },
+      );
+
+      if (requestUpdate.modifiedCount > 0) {
+        await this.notificationsService.create({
+          actorId: currentUserId,
+          recipientId: targetUserId,
+          type: 'follow_request',
+        });
+      }
+
+      const requestedUser = await this.userModel.findById(targetObjectId);
+
+      if (!requestedUser) {
+        throw new NotFoundException('User not found');
+      }
+
+      return this.userResponseMapper.toNetworkUser(
+        requestedUser,
+        currentUserId,
+      );
+    }
+
     const [currentUserUpdate] = await Promise.all([
       this.userModel.updateOne(
         { _id: currentObjectId },
@@ -522,12 +606,24 @@ export class UsersService {
       this.userModel.updateOne(
         { _id: targetObjectId },
         shouldFollow
-          ? { $addToSet: { followers: currentObjectId } }
-          : { $pull: { followers: currentObjectId } },
+          ? {
+              $addToSet: { followers: currentObjectId },
+              $pull: { followRequests: currentObjectId },
+            }
+          : {
+              $pull: {
+                followers: currentObjectId,
+                followRequests: currentObjectId,
+              },
+            },
       ),
     ]);
 
-    if (shouldFollow && currentUserUpdate.modifiedCount > 0) {
+    if (
+      shouldFollow &&
+      !isAlreadyFollowing &&
+      currentUserUpdate.modifiedCount > 0
+    ) {
       await this.notificationsService.create({
         actorId: currentUserId,
         recipientId: targetUserId,
@@ -535,13 +631,75 @@ export class UsersService {
       });
     }
 
-    const targetUser = await this.userModel.findById(targetUserId);
+    const updatedTargetUser = await this.userModel.findById(targetObjectId);
 
-    if (!targetUser) {
+    if (!updatedTargetUser) {
       throw new NotFoundException('User not found');
     }
 
-    return this.userResponseMapper.toNetworkUser(targetUser, currentUserId);
+    return this.userResponseMapper.toNetworkUser(
+      updatedTargetUser,
+      currentUserId,
+    );
+  }
+
+  async acceptFollowRequest(currentUserId: string, requesterUserId: string) {
+    const { currentObjectId, targetObjectId: requesterObjectId } =
+      await this.relationshipService.assertRelationshipTarget(
+        currentUserId,
+        requesterUserId,
+        'You cannot accept a follow request from yourself',
+        { requireCurrentUser: true },
+      );
+    const recipientUpdate = await this.userModel.updateOne(
+      { _id: currentObjectId, followRequests: requesterObjectId },
+      {
+        $addToSet: { followers: requesterObjectId },
+        $pull: { followRequests: requesterObjectId },
+      },
+    );
+
+    if (recipientUpdate.modifiedCount === 0) {
+      throw new NotFoundException('Follow request not found');
+    }
+
+    await this.userModel.updateOne(
+      { _id: requesterObjectId },
+      { $addToSet: { following: currentObjectId } },
+    );
+    await this.notificationsService.create({
+      actorId: currentUserId,
+      recipientId: requesterUserId,
+      type: 'follow_accept',
+    });
+
+    const requester = await this.userModel.findById(requesterObjectId);
+
+    if (!requester) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.userResponseMapper.toNetworkUser(requester, currentUserId);
+  }
+
+  async declineFollowRequest(currentUserId: string, requesterUserId: string) {
+    const { currentObjectId, targetObjectId: requesterObjectId } =
+      await this.relationshipService.assertRelationshipTarget(
+        currentUserId,
+        requesterUserId,
+        'You cannot decline a follow request from yourself',
+        { requireCurrentUser: true },
+      );
+    const result = await this.userModel.updateOne(
+      { _id: currentObjectId, followRequests: requesterObjectId },
+      { $pull: { followRequests: requesterObjectId } },
+    );
+
+    if (result.modifiedCount === 0) {
+      throw new NotFoundException('Follow request not found');
+    }
+
+    return { id: requesterUserId, ok: true };
   }
 
   async blockUser(currentUserId: string, targetUserId: string) {
@@ -556,12 +714,22 @@ export class UsersService {
         { _id: currentObjectId },
         {
           $addToSet: { blockedUsers: targetObjectId },
-          $pull: { following: targetObjectId, followers: targetObjectId },
+          $pull: {
+            followRequests: targetObjectId,
+            followers: targetObjectId,
+            following: targetObjectId,
+          },
         },
       ),
       this.userModel.updateOne(
         { _id: targetObjectId },
-        { $pull: { following: currentObjectId, followers: currentObjectId } },
+        {
+          $pull: {
+            followRequests: currentObjectId,
+            followers: currentObjectId,
+            following: currentObjectId,
+          },
+        },
       ),
     ]);
 

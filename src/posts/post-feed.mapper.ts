@@ -154,9 +154,18 @@ export class PostFeedMapper {
     hiddenBy,
   }: FeedContentVisibilityInput) {
     const authorId = author?._id?.toString();
+    const canViewPrivateContent =
+      author?.profileVisibility !== 'private' ||
+      authorId === currentUserId ||
+      Boolean(
+        currentUserId &&
+        author?.followers?.some(
+          (followerId) => followerId.toString() === currentUserId,
+        ),
+      );
     if (
       author?.isSuspended ||
-      author?.profileVisibility === 'private' ||
+      !canViewPrivateContent ||
       hiddenAuthorIds.has(authorId ?? '')
     ) {
       return false;

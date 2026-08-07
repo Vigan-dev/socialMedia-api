@@ -1,6 +1,9 @@
 import { IsBoolean, IsIn, IsOptional } from 'class-validator';
-import { MESSAGE_PRIVACY_OPTIONS } from '../user.constants';
-import type { MessagePrivacy } from '../user.constants';
+import {
+  MESSAGE_PRIVACY_OPTIONS,
+  PROFILE_VISIBILITY_OPTIONS,
+} from '../user.constants';
+import type { MessagePrivacy, ProfileVisibility } from '../user.constants';
 
 export class UpdatePrivacyDto {
   @IsOptional()
@@ -14,4 +17,8 @@ export class UpdatePrivacyDto {
   @IsOptional()
   @IsBoolean()
   showOnlineStatus?: boolean;
+
+  @IsOptional()
+  @IsIn(PROFILE_VISIBILITY_OPTIONS)
+  profileVisibility?: ProfileVisibility;
 }

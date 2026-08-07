@@ -21,6 +21,7 @@ describe('UserSchema canonical identities', () => {
           }),
         ],
         [{ blockedUsers: 1 }, expect.any(Object)],
+        [{ followRequests: 1 }, expect.any(Object)],
         [{ followers: 1 }, expect.any(Object)],
         [{ following: 1 }, expect.any(Object)],
         [{ mutedUsers: 1 }, expect.any(Object)],

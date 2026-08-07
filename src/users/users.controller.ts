@@ -65,6 +65,18 @@ export class UsersController {
     return this.usersService.findFollowing(request.user!.id, { cursor, limit });
   }
 
+  @Get('me/follow-requests')
+  getMyFollowRequests(
+    @Req() request: RequestWithUser,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.findFollowRequests(request.user!.id, {
+      cursor,
+      limit,
+    });
+  }
+
   @Get('suggestions')
   getSuggestions(@Req() request: RequestWithUser) {
     return this.usersService.findSuggestedUsers(request.user!.id);
@@ -110,6 +122,22 @@ export class UsersController {
     @Body() body: UpdateNotificationSettingsDto,
   ) {
     return this.usersService.updateNotificationSettings(request.user!.id, body);
+  }
+
+  @Put('follow-requests/:id')
+  acceptFollowRequest(
+    @Param('id') id: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.usersService.acceptFollowRequest(request.user!.id, id);
+  }
+
+  @Delete('follow-requests/:id')
+  declineFollowRequest(
+    @Param('id') id: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.usersService.declineFollowRequest(request.user!.id, id);
   }
 
   @Put(':id/follow')

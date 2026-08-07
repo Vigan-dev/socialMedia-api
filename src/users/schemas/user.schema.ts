@@ -125,6 +125,9 @@ export class User {
   following!: Types.ObjectId[];
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  followRequests!: Types.ObjectId[];
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
   blockedUsers!: Types.ObjectId[];
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
@@ -154,6 +157,7 @@ UserSchema.index(
   { name: 'user_username_lower_unique', unique: true },
 );
 UserSchema.index({ blockedUsers: 1 });
+UserSchema.index({ followRequests: 1 });
 UserSchema.index({ followers: 1 });
 UserSchema.index({ following: 1 });
 UserSchema.index({ mutedUsers: 1 });

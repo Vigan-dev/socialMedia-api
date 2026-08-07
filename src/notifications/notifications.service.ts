@@ -215,6 +215,8 @@ export class NotificationsService {
     if (type === 'like') return 'liked your post.';
     if (type === 'comment') return 'commented on your post.';
     if (type === 'follow') return 'started following you.';
+    if (type === 'follow_request') return 'requested to follow you.';
+    if (type === 'follow_accept') return 'accepted your follow request.';
     if (type === 'message') return 'sent you a message.';
     return 'mentioned you.';
   }
@@ -224,7 +226,13 @@ export class NotificationsService {
 
     if (type === 'like') return settings?.likes ?? true;
     if (type === 'comment') return settings?.comments ?? true;
-    if (type === 'follow') return settings?.follows ?? true;
+    if (
+      type === 'follow' ||
+      type === 'follow_request' ||
+      type === 'follow_accept'
+    ) {
+      return settings?.follows ?? true;
+    }
     if (type === 'mention') return settings?.mentions ?? true;
     return settings?.messages ?? true;
   }
