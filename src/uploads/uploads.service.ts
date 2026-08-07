@@ -33,10 +33,7 @@ const maxBytesByPurpose: Record<UploadPurpose, number> = {
 export class UploadsService {
   constructor(private readonly configService: ConfigService) {}
 
-  async saveImage(input: {
-    dataUrl: string;
-    purpose: UploadPurpose;
-  }) {
+  async saveImage(input: { dataUrl: string; purpose: UploadPurpose }) {
     const { buffer, mimeType } = this.parseImageDataUrl(input.dataUrl);
     const maxBytes = maxBytesByPurpose[input.purpose];
 
@@ -91,9 +88,9 @@ export class UploadsService {
   }
 
   private assertImageSignature(buffer: Buffer, mimeType: string) {
-    const isPng = buffer.subarray(0, 8).equals(
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    );
+    const isPng = buffer
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8;
     const isGif =
       buffer.subarray(0, 6).toString('ascii') === 'GIF87a' ||

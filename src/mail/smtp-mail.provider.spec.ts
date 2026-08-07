@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
+import type { SendMailOptions } from 'nodemailer';
 
 import { SmtpMailProvider } from './smtp-mail.provider';
 
@@ -12,12 +12,17 @@ describe('SmtpMailProvider', () => {
   const createTransport = nodemailer.createTransport as jest.MockedFunction<
     typeof nodemailer.createTransport
   >;
-  const sendMail = jest.fn();
+  const sendMail = jest.fn<
+    Promise<{ messageId: string }>,
+    [mailOptions: SendMailOptions]
+  >();
 
   beforeEach(() => {
     createTransport.mockReset();
     sendMail.mockReset().mockResolvedValue({ messageId: 'message-1' });
-    createTransport.mockReturnValue({ sendMail } as unknown as Transporter);
+    createTransport.mockReturnValue({
+      sendMail,
+    } as unknown as ReturnType<typeof nodemailer.createTransport>);
   });
 
   it('creates an SMTP transport and sends text and HTML reset links', async () => {
@@ -47,18 +52,15 @@ describe('SmtpMailProvider', () => {
       port: 465,
       secure: true,
     });
-    expect(sendMail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        from: 'SocialMedia <no-reply@example.com>',
-        subject: 'Reset your SocialMedia password',
-        text: expect.stringContaining(resetUrl),
-        to: 'user@example.com',
-      }),
-    );
-    expect(sendMail.mock.calls[0][0].html).toContain(
-      resetUrl.replace('&', '&amp;'),
-    );
-    expect(sendMail.mock.calls[0][0].html).toContain('30 minutes');
+    const [mailOptions] = sendMail.mock.calls[0];
+    expect(mailOptions).toMatchObject({
+      from: 'SocialMedia <no-reply@example.com>',
+      subject: 'Reset your SocialMedia password',
+      to: 'user@example.com',
+    });
+    expect(mailOptions.text).toContain(resetUrl);
+    expect(mailOptions.html).toContain(resetUrl.replace('&', '&amp;'));
+    expect(mailOptions.html).toContain('30 minutes');
   });
 
   it('fails outside development and test when SMTP is unavailable', async () => {

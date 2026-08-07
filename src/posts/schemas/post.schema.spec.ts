@@ -1,9 +1,11 @@
-import { model, models, Types } from 'mongoose';
-import { PostSchema } from './post.schema';
+import { Mongoose, Types } from 'mongoose';
+import { Post, PostSchema } from './post.schema';
 
-const PostValidationModel =
-  models.PostSchemaValidationSpec ??
-  model('PostSchemaValidationSpec', PostSchema);
+const isolatedMongoose = new Mongoose();
+const PostValidationModel = isolatedMongoose.model(
+  Post.name,
+  PostSchema.clone(),
+);
 
 describe('PostSchema validation', () => {
   const author = new Types.ObjectId();

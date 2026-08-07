@@ -18,7 +18,7 @@ type RateLimitBucket = {
   resetAt: number;
 };
 
-type RequestWithIp = Request & {
+type RequestWithIp = Omit<Request, 'body' | 'ip'> & {
   body?: unknown;
   ip?: string;
 };

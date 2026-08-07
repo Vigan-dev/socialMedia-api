@@ -95,35 +95,37 @@ export class PostFeedMapper {
     currentUserId?: string,
     hiddenAuthorIds = new Set<string>(),
   ): PublicPostResponse {
-    const {
-      authorId: _authorId,
-      isFollowing: _isFollowing,
-      isLiked: _isLiked,
-      isOwnPost: _isOwnPost,
-      ...publicPost
-    } = this.toFeedPost(post, currentUserId, hiddenAuthorIds);
-
-    const commentItems = publicPost.commentItems.map((comment) => {
-      const {
-        isLiked: _commentIsLiked,
-        replies,
-        ...publicComment
-      } = comment;
-
-      return {
-        ...publicComment,
-        replies: replies.map((reply) => {
-          const { isLiked: _replyIsLiked, ...publicReply } = reply;
-          return publicReply;
-        }),
-      };
-    });
+    const feedPost = this.toFeedPost(post, currentUserId, hiddenAuthorIds);
+    const commentItems: PublicPostResponse['commentItems'] =
+      feedPost.commentItems.map((comment) => ({
+        content: comment.content,
+        id: comment.id,
+        likes: comment.likes,
+        replies: comment.replies.map((reply) => ({
+          content: reply.content,
+          id: reply.id,
+          likes: reply.likes,
+          time: reply.time,
+          user: reply.user,
+        })),
+        time: comment.time,
+        user: comment.user,
+      }));
     const comments = this.countPublicComments(commentItems);
 
     return {
-      ...publicPost,
+      avatarBg: feedPost.avatarBg,
+      avatarText: feedPost.avatarText,
+      avatarUrl: feedPost.avatarUrl,
       commentItems,
       comments,
+      content: feedPost.content,
+      handle: feedPost.handle,
+      id: feedPost.id,
+      likes: feedPost.likes,
+      mediaUrls: feedPost.mediaUrls,
+      time: feedPost.time,
+      user: feedPost.user,
     };
   }
 

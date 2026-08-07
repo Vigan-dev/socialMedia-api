@@ -4,7 +4,7 @@ import { Reflector } from '@nestjs/core';
 
 import { AdminController } from '../../admin/admin.controller';
 import { ModerationController } from '../../admin/moderation.controller';
-import { roleGroups, type UserRole } from '../roles';
+import { roleGroups } from '../roles';
 import { RolesGuard } from './roles.guard';
 
 describe('RolesGuard', () => {
@@ -13,7 +13,7 @@ describe('RolesGuard', () => {
   };
   let guard: RolesGuard;
 
-  function createContext(role?: UserRole | string): ExecutionContext {
+  function createContext(role?: string): ExecutionContext {
     return {
       getClass: jest.fn(),
       getHandler: jest.fn(),

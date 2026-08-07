@@ -17,10 +17,7 @@ export type CommentResponse = {
   user: string;
 };
 
-export type PublicCommentReplyResponse = Omit<
-  CommentReplyResponse,
-  'isLiked'
->;
+export type PublicCommentReplyResponse = Omit<CommentReplyResponse, 'isLiked'>;
 
 export type PublicCommentResponse = Omit<
   CommentResponse,

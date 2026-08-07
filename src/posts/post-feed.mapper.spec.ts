@@ -229,19 +229,13 @@ describe('PostFeedMapper', () => {
       new Set([hiddenAuthorId.toString()]),
     );
 
-    expect(response).toEqual(
-      expect.not.objectContaining({
-        authorId: expect.any(String),
-        isFollowing: expect.any(Boolean),
-        isLiked: expect.any(Boolean),
-        isOwnPost: expect.any(Boolean),
-      }),
-    );
+    expect(response).not.toHaveProperty('authorId');
+    expect(response).not.toHaveProperty('isFollowing');
+    expect(response).not.toHaveProperty('isLiked');
+    expect(response).not.toHaveProperty('isOwnPost');
     expect(response.commentItems).toHaveLength(1);
     expect(response.comments).toBe(1);
-    expect(response.commentItems[0]).toEqual(
-      expect.not.objectContaining({ isLiked: expect.any(Boolean) }),
-    );
+    expect(response.commentItems[0]).not.toHaveProperty('isLiked');
     expect(response.commentItems[0].replies).toEqual([]);
   });
 });

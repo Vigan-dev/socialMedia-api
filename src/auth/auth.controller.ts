@@ -30,9 +30,7 @@ export class AuthController {
     bodyField: 'email',
     keyPrefix: 'auth:login:account',
     limit: 5,
-    secondaryLimits: [
-      { keyPrefix: 'auth:login:ip', limit: 20, ttlMs: 60_000 },
-    ],
+    secondaryLimits: [{ keyPrefix: 'auth:login:ip', limit: 20, ttlMs: 60_000 }],
     ttlMs: 60_000,
   })
   async login(

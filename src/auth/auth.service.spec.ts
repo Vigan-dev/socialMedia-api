@@ -331,11 +331,10 @@ describe('AuthService', () => {
         'test+reset@example.com',
       );
 
-      expect(response).toEqual({
-        message:
-          'If an account exists for that email, a reset link has been sent.',
-        resetToken: expect.any(String),
-      });
+      expect(response.message).toBe(
+        'If an account exists for that email, a reset link has been sent.',
+      );
+      expect(typeof response.resetToken).toBe('string');
       expect(mailProvider.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
 
       const email = mailProvider.sendPasswordResetEmail.mock.calls[0][0];
