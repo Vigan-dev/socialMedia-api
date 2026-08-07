@@ -71,4 +71,48 @@ describe('validateEnvironment', () => {
       }),
     ).toThrow('PUBLIC_API_URL must be an origin');
   });
+
+  it('requires SMTP delivery configuration in production', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validBaseEnv,
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('MAIL_FROM is required for SMTP mail delivery');
+  });
+
+  it('normalizes valid SMTP delivery configuration', () => {
+    const config = validateEnvironment({
+      ...validBaseEnv,
+      MAIL_FROM: ' SocialMedia <no-reply@example.com> ',
+      NODE_ENV: ' PRODUCTION ',
+      SMTP_HOST: ' smtp.example.com ',
+      SMTP_PASSWORD: 'secret',
+      SMTP_PORT: '465',
+      SMTP_USER: ' reset-user ',
+    });
+
+    expect(config).toEqual(
+      expect.objectContaining({
+        MAIL_FROM: 'SocialMedia <no-reply@example.com>',
+        NODE_ENV: 'production',
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '465',
+        SMTP_SECURE: 'true',
+        SMTP_USER: 'reset-user',
+      }),
+    );
+  });
+
+  it('requires SMTP credentials to be configured as a pair', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validBaseEnv,
+        MAIL_FROM: 'no-reply@example.com',
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '587',
+        SMTP_USER: 'reset-user',
+      }),
+    ).toThrow('SMTP_USER and SMTP_PASSWORD must be provided together');
+  });
 });

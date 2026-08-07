@@ -58,9 +58,61 @@ function parsePublicApiUrl(value: string) {
   return url.origin;
 }
 
+function validateMailConfiguration(config: Environment) {
+  const mailKeys = [
+    'MAIL_FROM',
+    'SMTP_HOST',
+    'SMTP_PASSWORD',
+    'SMTP_PORT',
+    'SMTP_SECURE',
+    'SMTP_USER',
+  ];
+  const isProduction = config.NODE_ENV === 'production';
+  const hasMailConfiguration = mailKeys.some((key) => config[key]?.trim());
+
+  if (!isProduction && !hasMailConfiguration) {
+    return;
+  }
+
+  for (const key of ['MAIL_FROM', 'SMTP_HOST', 'SMTP_PORT']) {
+    if (!config[key]?.trim()) {
+      throw new Error(`${key} is required for SMTP mail delivery`);
+    }
+  }
+
+  const smtpPort = Number(config.SMTP_PORT);
+
+  if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65_535) {
+    throw new Error('SMTP_PORT must be an integer between 1 and 65535');
+  }
+
+  const smtpSecure = config.SMTP_SECURE?.trim().toLowerCase();
+
+  if (smtpSecure && !['true', 'false'].includes(smtpSecure)) {
+    throw new Error('SMTP_SECURE must be true or false');
+  }
+
+  const smtpUser = config.SMTP_USER?.trim();
+  const smtpPassword = config.SMTP_PASSWORD;
+
+  if (Boolean(smtpUser) !== Boolean(smtpPassword)) {
+    throw new Error('SMTP_USER and SMTP_PASSWORD must be provided together');
+  }
+
+  config.MAIL_FROM = config.MAIL_FROM?.trim();
+  config.SMTP_HOST = config.SMTP_HOST?.trim();
+  config.SMTP_PORT = String(smtpPort);
+  config.SMTP_SECURE = smtpSecure ?? (smtpPort === 465 ? 'true' : 'false');
+  config.SMTP_USER = smtpUser;
+}
+
 export function validateEnvironment(config: Environment) {
   const mongodbUri = config.MONGODB_URI;
   const jwtSecret = config.JWT_SECRET?.trim();
+
+  if (config.NODE_ENV) {
+    config.NODE_ENV = config.NODE_ENV.trim().toLowerCase();
+  }
 
   if (!mongodbUri) {
     throw new Error('MONGODB_URI is required');
@@ -96,6 +148,8 @@ export function validateEnvironment(config: Environment) {
   );
   config.CLIENT_ORIGINS = clientOrigins.join(',');
   config.CLIENT_ORIGIN = clientOrigins[0];
+
+  validateMailConfiguration(config);
 
   if (config.OLLAMA_HOST && !URL.canParse(config.OLLAMA_HOST)) {
     throw new Error('OLLAMA_HOST must be a valid URL');

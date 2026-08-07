@@ -78,6 +78,23 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=AdminPassword1
 ```
 
+Development and test environments return password-reset tokens in the API
+response so the flow can be exercised without an SMTP server. Production
+requires SMTP configuration and sends a link that expires after 30 minutes:
+
+```env
+MAIL_FROM=SocialMedia <no-reply@example.com>
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+```
+
+Use `SMTP_SECURE=true` for implicit TLS (commonly port 465). For STARTTLS
+providers (commonly port 587), leave it `false`; Nodemailer upgrades the
+connection when the server supports it.
+
 Install dependencies:
 
 ```bash

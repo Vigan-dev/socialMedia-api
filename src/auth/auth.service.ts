@@ -1,8 +1,19 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import { MailProvider } from '../mail/mail.provider';
+import type { UserRole } from './roles';
+import {
+  accessTokenAudience,
+  isRefreshTokenPayload,
+  jwtIssuer,
+  refreshTokenAudience,
+  type AccessTokenPayload,
+  type RefreshTokenPayload,
+} from './auth-token';
 
 type AuthSession = {
   accessToken: string;
@@ -16,12 +27,16 @@ const accessTokenMaxAgeMs = 15 * 60 * 1000;
 const shortRefreshTokenMaxAgeMs = 7 * 24 * 60 * 60 * 1000;
 const longRefreshTokenMaxAgeMs = 30 * 24 * 60 * 60 * 1000;
 const passwordResetTokenMaxAgeMs = 30 * 60 * 1000;
+const passwordResetTokenMaxAgeMinutes =
+  passwordResetTokenMaxAgeMs / (60 * 1000);
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly mailProvider: MailProvider,
   ) {}
 
   async register(username: string, email: string, password: string) {
@@ -71,16 +86,18 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthSession> {
-    let payload: {
-      sub: string;
-      email: string;
-      role: string;
-      rememberMe?: boolean;
-    };
+    let payload: unknown;
 
     try {
-      payload = await this.jwtService.verifyAsync(refreshToken);
+      payload = await this.jwtService.verifyAsync(refreshToken, {
+        audience: refreshTokenAudience,
+        issuer: jwtIssuer,
+      });
     } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (!isRefreshTokenPayload(payload)) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -110,9 +127,15 @@ export class AuthService {
 
   async logout(refreshToken: string) {
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub: string }>(
-        refreshToken,
-      );
+      const payload: unknown = await this.jwtService.verifyAsync(refreshToken, {
+        audience: refreshTokenAudience,
+        issuer: jwtIssuer,
+      });
+
+      if (!isRefreshTokenPayload(payload)) {
+        return;
+      }
+
       await this.usersService.clearRefreshTokenHash(payload.sub);
     } catch {
       return;
@@ -139,11 +162,22 @@ export class AuthService {
       new Date(Date.now() + passwordResetTokenMaxAgeMs),
     );
 
-    if (process.env.NODE_ENV === 'production') {
-      return { message };
-    }
+    const resetUrl = new URL(
+      '/forgot-password',
+      this.configService.getOrThrow<string>('CLIENT_ORIGIN'),
+    );
+    resetUrl.searchParams.set('email', user.email);
+    resetUrl.searchParams.set('token', resetToken);
 
-    return { message, resetToken };
+    await this.mailProvider.sendPasswordResetEmail({
+      expiresInMinutes: passwordResetTokenMaxAgeMinutes,
+      resetUrl: resetUrl.toString(),
+      to: user.email,
+    });
+
+    return this.canExposePasswordResetToken()
+      ? { message, resetToken }
+      : { message };
   }
 
   async resetPassword(email: string, token: string, password: string) {
@@ -180,27 +214,35 @@ export class AuthService {
   private async createSession(
     userId: string,
     email: string,
-    role: string,
+    role: UserRole,
     rememberMe: boolean,
   ): Promise<AuthSession> {
     const refreshTokenMaxAgeMs = rememberMe
       ? longRefreshTokenMaxAgeMs
       : shortRefreshTokenMaxAgeMs;
 
-    const accessToken = await this.jwtService.signAsync(
-      { sub: userId, email, role },
-      { expiresIn: `${accessTokenMaxAgeMs / 1000}s` },
-    );
-    const refreshToken = await this.jwtService.signAsync(
-      {
-        sub: userId,
-        email,
-        role,
-        rememberMe,
-        tokenId: randomBytes(16).toString('hex'),
-      },
-      { expiresIn: `${refreshTokenMaxAgeMs / 1000}s` },
-    );
+    const accessTokenPayload: AccessTokenPayload = {
+      email,
+      role,
+      sub: userId,
+      tokenType: 'access',
+    };
+    const refreshTokenPayload: RefreshTokenPayload = {
+      rememberMe,
+      sub: userId,
+      tokenId: randomBytes(16).toString('hex'),
+      tokenType: 'refresh',
+    };
+    const accessToken = await this.jwtService.signAsync(accessTokenPayload, {
+      audience: accessTokenAudience,
+      expiresIn: `${accessTokenMaxAgeMs / 1000}s`,
+      issuer: jwtIssuer,
+    });
+    const refreshToken = await this.jwtService.signAsync(refreshTokenPayload, {
+      audience: refreshTokenAudience,
+      expiresIn: `${refreshTokenMaxAgeMs / 1000}s`,
+      issuer: jwtIssuer,
+    });
 
     await this.usersService.updateRefreshTokenHash(
       userId,
@@ -214,5 +256,14 @@ export class AuthService {
       refreshTokenMaxAgeMs,
       userId,
     };
+  }
+
+  private canExposePasswordResetToken() {
+    const nodeEnvironment = this.configService
+      .get<string>('NODE_ENV')
+      ?.trim()
+      .toLowerCase();
+
+    return nodeEnvironment === 'development' || nodeEnvironment === 'test';
   }
 }

@@ -1,19 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
-
-interface JwtPayload {
-  sub: string;
-  email: string;
-  role: string;
-}
+import {
+  accessTokenAudience,
+  isAccessTokenPayload,
+  jwtIssuer,
+} from '../auth-token';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(configService: ConfigService) {
     super({
+      audience: accessTokenAudience,
+      issuer: jwtIssuer,
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
         (request: Request) => extractCookie(request, 'access_token'),
@@ -23,7 +24,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: JwtPayload) {
+  validate(payload: unknown) {
+    if (!isAccessTokenPayload(payload)) {
+      throw new UnauthorizedException('Invalid access token');
+    }
+
     return {
       id: payload.sub,
       email: payload.email,
