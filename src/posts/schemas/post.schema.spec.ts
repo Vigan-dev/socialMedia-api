@@ -18,6 +18,7 @@ describe('PostSchema validation', () => {
     });
 
     await expect(post.validate()).resolves.toBeUndefined();
+    expect(post.savedBy).toEqual([]);
   });
 
   it('allows a post with media and no text', async () => {

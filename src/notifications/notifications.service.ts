@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User } from '../users/schemas/user.schema';
@@ -16,6 +16,7 @@ import {
   encodeCursor,
   parsePageLimit,
 } from '../common/pagination/cursor-pagination';
+import { RealtimePublisher } from '../realtime/realtime.publisher';
 
 type CreateNotificationInput = {
   actorId: string;
@@ -48,11 +49,14 @@ type NotificationWithActor = {
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    private readonly realtimePublisher: RealtimePublisher,
   ) {}
 
   async findForUser(userId: string, query: NotificationPageQuery = {}) {
@@ -102,7 +106,9 @@ export class NotificationsService {
     };
   }
 
-  async create(input: CreateNotificationInput) {
+  async create(
+    input: CreateNotificationInput,
+  ): Promise<NotificationDocument | null> {
     if (!input.recipientId || input.recipientId === input.actorId) {
       return null;
     }
@@ -120,6 +126,22 @@ export class NotificationsService {
       recipient: new Types.ObjectId(input.recipientId),
       type: input.type,
     });
+
+    try {
+      const populated = await notification.populate<{ actor: PopulatedUser }>(
+        'actor',
+        'username avatarUrl',
+      );
+      const response = this.toResponse(
+        populated.toObject() as unknown as NotificationWithActor,
+      );
+      this.realtimePublisher.publishNotification(input.recipientId, response);
+    } catch (error) {
+      this.logger.warn(
+        `Notification ${notification._id.toString()} was stored but realtime delivery failed`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
 
     return notification;
   }
@@ -169,6 +191,8 @@ export class NotificationsService {
       { recipient: new Types.ObjectId(userId), read: false },
       { read: true },
     );
+
+    this.realtimePublisher.publishNotificationsRead(userId);
 
     return this.findForUser(userId);
   }

@@ -28,6 +28,7 @@ import type {
 } from './post-feed.types';
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 import { normalizeUsernameLower } from '../users/user-identity';
+import { SavedPostsService } from './saved-posts.service';
 
 type AuthUser = {
   id: string;
@@ -124,6 +125,7 @@ export class PostsService {
     private readonly postFeedMapper: PostFeedMapper,
     private readonly postReportsService: PostReportsService,
     private readonly configService: ConfigService,
+    private readonly savedPostsService: SavedPostsService,
   ) {}
 
   async findAll(
@@ -478,7 +480,10 @@ export class PostsService {
     }
 
     await post.deleteOne();
-    await this.notificationsService.deleteForPost(postId);
+    await Promise.all([
+      this.notificationsService.deleteForPost(postId),
+      this.savedPostsService.removeDeletedPost(postId),
+    ]);
 
     return { id: postId, ok: true };
   }

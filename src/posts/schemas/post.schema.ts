@@ -80,6 +80,9 @@ export class Post {
   @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
   likedBy!: Types.ObjectId[];
 
+  @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
+  savedBy!: Types.ObjectId[];
+
   @Prop({ type: [PostCommentSchema], default: [] })
   comments!: PostComment[];
 
@@ -104,3 +107,4 @@ export const PostSchema = SchemaFactory.createForClass(Post);
 PostSchema.index({ createdAt: -1, _id: -1 });
 PostSchema.index({ author: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ hiddenBy: 1 });
+PostSchema.index({ savedBy: 1, createdAt: -1, _id: -1 });

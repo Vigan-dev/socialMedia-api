@@ -96,6 +96,23 @@ All notification endpoints require authentication.
 | `GET`   | `/notifications?limit=30&cursor=...` | Get current-user notifications newest-first as a cursor page. |
 | `PATCH` | `/notifications/read-all`            | Mark all current-user notifications as read.                  |
 
+## Saved posts
+
+All saved-post and collection endpoints require authentication. Saved content
+is private to the current user.
+
+| Method   | Path                                                        | Description                                                        |
+| -------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| `GET`    | `/saved-posts`                                              | Get up to 100 currently accessible saved posts.                    |
+| `PUT`    | `/saved-posts/:postId`                                      | Save an accessible post. Idempotent.                               |
+| `DELETE` | `/saved-posts/:postId`                                      | Unsave a post and remove it from the user's collections.           |
+| `GET`    | `/saved-posts/collections`                                 | List the current user's collections and their post IDs.            |
+| `POST`   | `/saved-posts/collections`                                 | Create a named collection with `{ "name": "..." }`.             |
+| `PATCH`  | `/saved-posts/collections/:collectionId`                   | Rename an owned collection.                                        |
+| `DELETE` | `/saved-posts/collections/:collectionId`                   | Delete a collection without unsaving its posts.                    |
+| `PUT`    | `/saved-posts/collections/:collectionId/posts/:postId`     | Add a post to a collection and ensure it is saved. Idempotent.     |
+| `DELETE` | `/saved-posts/collections/:collectionId/posts/:postId`     | Remove a post from a collection while keeping it in All saved.     |
+
 ## Conversations
 
 All conversation endpoints require authentication.
@@ -108,6 +125,29 @@ All conversation endpoints require authentication.
 | `POST`  | `/conversations/:id/messages`                     | Send a message.                                                                       |
 | `PATCH` | `/conversations/:id/read`                         | Mark a conversation as read.                                                          |
 | `PATCH` | `/conversations/:id/typing`                       | Update typing state.                                                                  |
+
+## Realtime events
+
+Socket.IO connects to the API base URL on the default `/socket.io` path. The
+handshake uses the HTTP-only `access_token` cookie and must include an origin
+allowed by `CLIENT_ORIGINS`. The server assigns the authenticated socket to an
+internal per-user room; clients do not join rooms themselves.
+
+The connection is receive-only for application data. Message, typing, read,
+and notification mutations continue to use the REST endpoints above so their
+authorization, validation, and rate limits remain in effect.
+
+| Server event            | Payload                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `conversation:updated`  | The authenticated user's personalized conversation response.  |
+| `message:new`           | `{ conversationId, message }`                                  |
+| `message:read`          | `{ conversationId }`                                           |
+| `notification:new`      | A notification response.                                       |
+| `notification:read-all` | No payload.                                                     |
+
+The frontend uses REST for initial loading, pagination, focus recovery, and
+reconciliation after reconnecting, so persisted updates are recovered if a
+socket event is missed.
 
 ## Admin
 

@@ -75,6 +75,7 @@ describe('PostsService feed pagination', () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never,
     );
   });
 

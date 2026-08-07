@@ -11,11 +11,12 @@ This service powers the Next.js frontend, stores data in MongoDB, and exposes RE
 - One-time password reset tokens
 - User profiles, avatars, status, privacy, and notification settings
 - Public/private accounts, follow requests, block, mute, and user suggestions
-- Posts, likes, comments, replies, hiding, and feed visibility filtering
+- Posts, likes, comments, replies, saved posts, collections, hiding, and feed visibility filtering
 - Reporting for posts, comments, and users
 - Moderator report queue
 - Admin dashboard data and admin-only actions
-- Direct conversations, unread counts, and typing state
+- Realtime direct messages, unread counts, typing state, and read receipts
+- Realtime notification delivery with REST reconnect recovery
 - Support chat history isolated per user
 - Demo seed script with normal, moderator, and admin accounts
 
@@ -37,6 +38,7 @@ src/users/             profiles, relationships, privacy, notification settings
 src/posts/             posts, comments, replies, reports, feed visibility
 src/conversations/     direct messages, unread counts, typing state
 src/notifications/     notification inbox
+src/realtime/          authenticated Socket.IO gateway and event publisher
 src/admin/             admin bootstrap and admin/moderation data
 src/ai/                support chat
 scripts/seed-demo.ts   local demo data

@@ -77,6 +77,7 @@ export class PostFeedMapper {
           time: (comment.createdAt ?? createdAt).toISOString(),
         })),
       isLiked: this.isLikedByViewer(post.likedBy, currentUserId),
+      isSaved: this.isSavedByViewer(post.savedBy, currentUserId),
       isOwnPost: currentUserId
         ? post.author?._id?.toString() === currentUserId
         : false,
@@ -187,6 +188,17 @@ export class PostFeedMapper {
     return currentUserId
       ? (likedBy ?? []).some(
           (likedUserId) => likedUserId.toString() === currentUserId,
+        )
+      : false;
+  }
+
+  private isSavedByViewer(
+    savedBy: Types.ObjectId[] | undefined,
+    currentUserId?: string,
+  ) {
+    return currentUserId
+      ? (savedBy ?? []).some(
+          (savedUserId) => savedUserId.toString() === currentUserId,
         )
       : false;
   }

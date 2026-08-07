@@ -81,6 +81,7 @@ describe('PostsService desired like state', () => {
       } as never,
       {} as never,
       { get: jest.fn() } as never,
+      {} as never,
     );
   });
 

@@ -14,6 +14,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { RateLimitGuard } from './rate-limit/rate-limit.guard';
 import { UploadsModule } from './uploads/uploads.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { UploadsModule } from './uploads/uploads.module';
         serverSelectionTimeoutMS: 5000,
       }),
     }),
+    RealtimeModule,
     AiModule,
     AdminModule,
     UsersModule,

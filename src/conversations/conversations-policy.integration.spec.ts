@@ -83,6 +83,7 @@ describe('ConversationsService communication policy integration', () => {
       messageModel as never,
       communicationPolicyService,
       notificationsService as never,
+      {} as never,
     );
   });
 

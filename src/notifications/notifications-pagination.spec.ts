@@ -20,6 +20,7 @@ describe('NotificationsService pagination', () => {
     const service = new NotificationsService(
       notificationModel as never,
       {} as never,
+      {} as never,
     );
     const cursor = encodeCursor('notifications', {
       id: boundaryId.toString(),

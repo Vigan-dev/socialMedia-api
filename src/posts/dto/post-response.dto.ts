@@ -39,6 +39,7 @@ export type FeedPostResponse = {
   isFollowing: boolean;
   isLiked: boolean;
   isOwnPost: boolean;
+  isSaved: boolean;
   likes: number;
   mediaUrls: string[];
   time: string;
@@ -47,7 +48,12 @@ export type FeedPostResponse = {
 
 export type PublicPostResponse = Omit<
   FeedPostResponse,
-  'authorId' | 'commentItems' | 'isFollowing' | 'isLiked' | 'isOwnPost'
+  | 'authorId'
+  | 'commentItems'
+  | 'isFollowing'
+  | 'isLiked'
+  | 'isOwnPost'
+  | 'isSaved'
 > & {
   commentItems: PublicCommentResponse[];
 };

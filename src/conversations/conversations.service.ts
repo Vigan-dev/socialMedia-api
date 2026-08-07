@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -29,6 +30,7 @@ import {
   encodeCursor,
   parsePageLimit,
 } from '../common/pagination/cursor-pagination';
+import { RealtimePublisher } from '../realtime/realtime.publisher';
 
 const TYPING_TTL_MS = 6000;
 
@@ -48,6 +50,8 @@ function isDuplicateKeyError(error: unknown) {
 
 @Injectable()
 export class ConversationsService {
+  private readonly logger = new Logger(ConversationsService.name);
+
   constructor(
     @InjectModel(Conversation.name)
     private readonly conversationModel: Model<ConversationDocument>,
@@ -55,6 +59,7 @@ export class ConversationsService {
     private readonly messageModel: Model<MessageDocument>,
     private readonly communicationPolicyService: CommunicationPolicyService,
     private readonly notificationsService: NotificationsService,
+    private readonly realtimePublisher: RealtimePublisher,
   ) {}
 
   async findForUser(userId: string, query: ConversationPageQuery = {}) {
@@ -170,6 +175,8 @@ export class ConversationsService {
       },
     ]);
 
+    this.publishConversation(populated, participantIds);
+
     return mapConversationDocumentToResponse(populated, userId);
   }
 
@@ -282,6 +289,26 @@ export class ConversationsService {
 
     const populated = await message.populate('sender', 'username avatarUrl');
 
+    try {
+      const updatedConversation = await this.findPopulatedConversation(
+        conversation._id,
+      );
+      this.publishConversation(updatedConversation, conversation.participants);
+
+      for (const participantId of conversation.participants) {
+        const participantUserId = participantId.toString();
+        this.realtimePublisher.publishMessage(participantUserId, {
+          conversationId,
+          message: mapMessageDocumentToResponse(populated, participantUserId),
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Message ${message._id.toString()} was stored but realtime delivery failed`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
     return mapMessageDocumentToResponse(populated, userId);
   }
 
@@ -324,6 +351,16 @@ export class ConversationsService {
         select: 'username',
       },
     ]);
+
+    this.publishConversation(populated, conversation.participants);
+    for (const participantId of conversation.participants) {
+      const participantUserId = participantId.toString();
+      if (participantUserId !== userId) {
+        this.realtimePublisher.publishMessageRead(participantUserId, {
+          conversationId,
+        });
+      }
+    }
 
     return mapConversationDocumentToResponse(populated, userId);
   }
@@ -381,6 +418,8 @@ export class ConversationsService {
       },
     ]);
 
+    this.publishConversation(populated, conversation.participants);
+
     return mapConversationDocumentToResponse(populated, userId);
   }
 
@@ -420,5 +459,37 @@ export class ConversationsService {
     }
 
     return conversation;
+  }
+
+  private async findPopulatedConversation(conversationId: Types.ObjectId) {
+    const conversation = await this.conversationModel.findById(conversationId);
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    return conversation.populate([
+      {
+        path: 'participants',
+        select: 'username avatarUrl status showOnlineStatus',
+      },
+      {
+        path: 'typing.user',
+        select: 'username',
+      },
+    ]);
+  }
+
+  private publishConversation(
+    conversation: ConversationDocument,
+    participantIds: Types.ObjectId[],
+  ) {
+    for (const participantId of participantIds) {
+      const userId = participantId.toString();
+      this.realtimePublisher.publishConversation(
+        userId,
+        mapConversationDocumentToResponse(conversation, userId),
+      );
+    }
   }
 }

@@ -37,6 +37,7 @@ describe('ConversationsService pagination', () => {
       messageModel as never,
       {} as never,
       {} as never,
+      {} as never,
     );
   });
 

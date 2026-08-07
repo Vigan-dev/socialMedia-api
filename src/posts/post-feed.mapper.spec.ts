@@ -55,6 +55,7 @@ describe('PostFeedMapper', () => {
         content: 'Mapped post',
         createdAt,
         likedBy: [viewerId],
+        savedBy: [viewerId],
       } satisfies PostWithAuthor,
       viewerId.toString(),
     );
@@ -68,6 +69,7 @@ describe('PostFeedMapper', () => {
         isFollowing: true,
         isLiked: true,
         isOwnPost: false,
+        isSaved: true,
         likes: 1,
         time: createdAt.toISOString(),
         user: 'Author User',
