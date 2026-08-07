@@ -11,6 +11,7 @@ describe('validateEnvironment', () => {
 
     expect(config.CLIENT_ORIGINS).toBe('http://localhost:3001');
     expect(config.CLIENT_ORIGIN).toBe('http://localhost:3001');
+    expect(config.TRUST_PROXY_HOPS).toBe('0');
   });
 
   it('accepts the legacy single client origin variable', () => {
@@ -70,6 +71,17 @@ describe('validateEnvironment', () => {
         PUBLIC_API_URL: 'https://api.example.com/uploads',
       }),
     ).toThrow('PUBLIC_API_URL must be an origin');
+  });
+
+  it('accepts only a bounded trusted proxy hop count', () => {
+    expect(
+      validateEnvironment({ ...validBaseEnv, TRUST_PROXY_HOPS: '2' })
+        .TRUST_PROXY_HOPS,
+    ).toBe('2');
+
+    expect(() =>
+      validateEnvironment({ ...validBaseEnv, TRUST_PROXY_HOPS: '-1' }),
+    ).toThrow('TRUST_PROXY_HOPS must be an integer between 0 and 10');
   });
 
   it('requires SMTP delivery configuration in production', () => {

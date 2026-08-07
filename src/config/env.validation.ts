@@ -143,6 +143,16 @@ export function validateEnvironment(config: Environment) {
     throw new Error('PORT must be a number');
   }
 
+  const trustProxyHops = Number(config.TRUST_PROXY_HOPS ?? 0);
+  if (
+    !Number.isInteger(trustProxyHops) ||
+    trustProxyHops < 0 ||
+    trustProxyHops > 10
+  ) {
+    throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 10');
+  }
+  config.TRUST_PROXY_HOPS = String(trustProxyHops);
+
   const clientOrigins = parseClientOrigins(
     config.CLIENT_ORIGINS ?? config.CLIENT_ORIGIN ?? defaultClientOrigin,
   );

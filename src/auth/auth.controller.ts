@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 
 import type { Request, Response } from 'express';
@@ -14,6 +16,15 @@ import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RateLimit } from '../rate-limit/rate-limit.decorator';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { getRequestMetadata } from '../security/request-metadata';
+
+type RequestWithUser = Request & {
+  user?: {
+    id: string;
+  };
+};
 
 @Controller('auth')
 export class AuthController {
@@ -38,11 +49,14 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
+    const metadata = getRequestMetadata(request);
+
     try {
       const session = await this.authService.login(
         body.email,
         body.password,
         body.rememberMe,
+        metadata,
       );
       this.logLoginAttempt(request, body.email, true);
       this.setSessionCookies(response, session);
@@ -55,6 +69,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @RateLimit({ keyPrefix: 'auth:refresh', limit: 30, ttlMs: 60_000 })
   async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
@@ -88,12 +103,58 @@ export class AuthController {
     limit: 5,
     ttlMs: 15 * 60_000,
   })
-  resetPassword(@Body() body: ResetPasswordDto) {
+  resetPassword(@Body() body: ResetPasswordDto, @Req() request: Request) {
     return this.authService.resetPassword(
       body.email,
       body.token,
       body.password,
+      getRequestMetadata(request),
     );
+  }
+
+  @Get('security/activity')
+  @UseGuards(JwtAuthGuard)
+  getSecurityActivity(@Req() request: RequestWithUser) {
+    return this.authService.getSecurityActivity(request.user!.id);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({
+    keyPrefix: 'auth:change-password',
+    limit: 5,
+    ttlMs: 15 * 60_000,
+  })
+  async changePassword(
+    @Body() body: ChangePasswordDto,
+    @Req() request: RequestWithUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.changePassword(
+      request.user!.id,
+      body.currentPassword,
+      body.newPassword,
+      getRequestMetadata(request),
+    );
+    this.clearSessionCookies(response);
+
+    return result;
+  }
+
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'auth:logout-all', limit: 5, ttlMs: 60_000 })
+  async logoutAll(
+    @Req() request: RequestWithUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.revokeAllSessions(
+      request.user!.id,
+      getRequestMetadata(request),
+    );
+    this.clearSessionCookies(response);
+
+    return result;
   }
 
   @Post('logout')
@@ -172,17 +233,7 @@ export class AuthController {
   }
 
   private getClientIp(request: Request) {
-    const forwardedFor = request.headers['x-forwarded-for'];
-    const firstForwardedIp = Array.isArray(forwardedFor)
-      ? forwardedFor[0]
-      : forwardedFor?.split(',')[0];
-
-    return (
-      firstForwardedIp?.trim() ||
-      request.ip ||
-      request.socket.remoteAddress ||
-      'unknown'
-    );
+    return getRequestMetadata(request).ip;
   }
 
   private redactEmail(email: string) {

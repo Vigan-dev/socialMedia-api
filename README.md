@@ -9,6 +9,9 @@ This service powers the Next.js frontend, stores data in MongoDB, and exposes RE
 - Cookie-based authentication with access and refresh tokens
 - Login, register, refresh, logout, forgot password, and reset password
 - One-time password reset tokens
+- Persistent login lockout, immediate session revocation, and security activity
+- Change-password and sign-out-all account controls
+- Helmet response headers and trusted-proxy-aware client IP handling
 - User profiles, avatars, status, privacy, and notification settings
 - Public/private accounts, follow requests, block, mute, and user suggestions
 - Posts, likes, comments, replies, saved posts, collections, hiding, and feed visibility filtering
@@ -72,6 +75,7 @@ Recommended local values:
 MONGODB_URI=mongodb://localhost:27017/socialmedia
 CLIENT_ORIGINS=http://localhost:3001
 PUBLIC_API_URL=http://localhost:3000
+TRUST_PROXY_HOPS=0
 JWT_SECRET=replace-with-a-long-random-secret-at-least-32-chars
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
@@ -188,6 +192,11 @@ CLIENT_ORIGINS=http://localhost:3001,https://preview.example.com,https://app.exa
 Set `PUBLIC_API_URL` to the public origin where this API is reachable. Uploaded
 image responses are built from this trusted value. If it is omitted, upload
 responses use relative `/uploads/...` paths.
+
+Keep `TRUST_PROXY_HOPS=0` when the API is directly exposed. When deploying
+behind a reverse proxy, set it to the exact number of trusted proxy hops. This
+lets Express resolve the real client IP without trusting attacker-supplied
+`X-Forwarded-For` headers from direct connections.
 
 ## GitHub Push
 

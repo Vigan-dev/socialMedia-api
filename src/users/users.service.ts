@@ -59,7 +59,9 @@ export class UsersService {
   async findByEmail(email: string) {
     return this.userModel
       .findOne({ emailLower: normalizeEmail(email) })
-      .select('+password');
+      .select(
+        '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion',
+      );
   }
 
   async findByEmailWithPasswordReset(email: string) {
@@ -73,7 +75,17 @@ export class UsersService {
   }
 
   async findByIdWithRefreshToken(id: string) {
-    return this.userModel.findById(id).select('+refreshTokenHash');
+    return this.userModel
+      .findById(id)
+      .select('+refreshTokenHash +securityVersion');
+  }
+
+  async findByIdWithPasswordAndSecurity(id: string) {
+    return this.userModel.findById(id).select('+password +securityVersion');
+  }
+
+  async findByIdForAccess(id: string) {
+    return this.userModel.findById(id).select('+securityVersion');
   }
 
   async updateRefreshTokenHash(userId: string, refreshTokenHash: string) {
@@ -84,6 +96,83 @@ export class UsersService {
     await this.userModel.updateOne(
       { _id: userId },
       { $unset: { refreshTokenHash: '' } },
+    );
+  }
+
+  async recordFailedLogin(userId: string, now = new Date()) {
+    const windowCutoff = new Date(now.getTime() - 15 * 60_000);
+    const lockedUntil = new Date(now.getTime() + 15 * 60_000);
+    const withinWindow = {
+      $gte: [
+        { $ifNull: ['$failedLoginWindowStartedAt', new Date(0)] },
+        windowCutoff,
+      ],
+    };
+    const nextAttemptCount = {
+      $cond: [
+        withinWindow,
+        { $add: [{ $ifNull: ['$failedLoginAttempts', 0] }, 1] },
+        1,
+      ],
+    };
+
+    await this.userModel.updateOne({ _id: userId }, [
+      {
+        $set: {
+          failedLoginAttempts: nextAttemptCount,
+          failedLoginWindowStartedAt: {
+            $cond: [withinWindow, '$failedLoginWindowStartedAt', now],
+          },
+        },
+      },
+      {
+        $set: {
+          failedLoginAttempts: {
+            $cond: [
+              { $gte: ['$failedLoginAttempts', 5] },
+              0,
+              '$failedLoginAttempts',
+            ],
+          },
+          failedLoginWindowStartedAt: {
+            $cond: [
+              { $gte: ['$failedLoginAttempts', 5] },
+              '$$REMOVE',
+              '$failedLoginWindowStartedAt',
+            ],
+          },
+          loginLockedUntil: {
+            $cond: [
+              { $gte: ['$failedLoginAttempts', 5] },
+              lockedUntil,
+              '$loginLockedUntil',
+            ],
+          },
+        },
+      },
+    ]);
+  }
+
+  async clearFailedLoginState(userId: string) {
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        $unset: {
+          failedLoginAttempts: '',
+          failedLoginWindowStartedAt: '',
+          loginLockedUntil: '',
+        },
+      },
+    );
+  }
+
+  async invalidateSessions(userId: string) {
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        $inc: { securityVersion: 1 },
+        $unset: { refreshTokenHash: '' },
+      },
     );
   }
 
@@ -98,12 +187,16 @@ export class UsersService {
     );
   }
 
-  async updatePassword(userId: string, password: string) {
+  async updatePasswordAndInvalidateSessions(userId: string, password: string) {
     await this.userModel.updateOne(
       { _id: userId },
       {
-        password,
+        $inc: { securityVersion: 1 },
+        $set: { password },
         $unset: {
+          failedLoginAttempts: '',
+          failedLoginWindowStartedAt: '',
+          loginLockedUntil: '',
           passwordResetExpiresAt: '',
           passwordResetTokenHash: '',
           refreshTokenHash: '',
@@ -124,8 +217,12 @@ export class UsersService {
         passwordResetExpiresAt: { $gt: new Date() },
       },
       {
-        password,
+        $inc: { securityVersion: 1 },
+        $set: { password },
         $unset: {
+          failedLoginAttempts: '',
+          failedLoginWindowStartedAt: '',
+          loginLockedUntil: '',
           passwordResetExpiresAt: '',
           passwordResetTokenHash: '',
           refreshTokenHash: '',

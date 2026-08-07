@@ -38,6 +38,14 @@ The default page size is 30 for users, conversations, messages, and notification
 | `POST` | `/auth/logout`          | Optional refresh cookie | Clear auth cookies and invalidate the stored refresh token.                                          |
 | `POST` | `/auth/forgot-password` | No                      | Email a 30-minute password reset link. The token is returned only when `NODE_ENV` is explicitly `development` or `test`. |
 | `POST` | `/auth/reset-password`  | No                      | Reset password with email, token, and new password.                                                  |
+| `GET`  | `/auth/security/activity` | Access cookie          | Get the current user's 20 most recent security events.                                               |
+| `POST` | `/auth/change-password` | Access cookie            | Change the password after verifying `currentPassword`; revokes every session.                         |
+| `POST` | `/auth/logout-all`      | Access cookie            | Increment the account session version, disconnect sockets, and sign out every device.                 |
+
+Five failed passwords within a rolling 15-minute window lock that account for
+15 minutes. Security activity is retained for 90 days. Password changes,
+password resets, and logout-all invalidate access tokens immediately through a
+server-checked session version rather than waiting for JWT expiry.
 
 ## Users
 
@@ -144,6 +152,7 @@ authorization, validation, and rate limits remain in effect.
 | `message:read`          | `{ conversationId }`                                           |
 | `notification:new`      | A notification response.                                       |
 | `notification:read-all` | No payload.                                                     |
+| `session:revoked`       | No payload; the server then disconnects the user's sockets.     |
 
 The frontend uses REST for initial loading, pagination, focus recovery, and
 reconciliation after reconnecting, so persisted updates are recovered if a

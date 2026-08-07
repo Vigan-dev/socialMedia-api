@@ -50,6 +50,12 @@ export class RealtimePublisher {
     this.server?.to(this.userRoom(userId)).emit('notification:read-all');
   }
 
+  revokeUserSessions(userId: string) {
+    const room = this.userRoom(userId);
+    this.server?.to(room).emit('session:revoked');
+    this.server?.in(room).disconnectSockets(true);
+  }
+
   private userRoom(userId: string) {
     return `user:${userId}`;
   }

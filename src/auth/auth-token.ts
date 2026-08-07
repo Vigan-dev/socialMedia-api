@@ -7,6 +7,7 @@ export const refreshTokenAudience = 'socialmedia-refresh';
 export type AccessTokenPayload = {
   email: string;
   role: UserRole;
+  sessionVersion: number;
   sub: string;
   tokenType: 'access';
 };
@@ -27,6 +28,9 @@ export function isAccessTokenPayload(
     payload.tokenType === 'access' &&
     typeof payload.sub === 'string' &&
     typeof payload.email === 'string' &&
+    typeof payload.sessionVersion === 'number' &&
+    Number.isInteger(payload.sessionVersion) &&
+    payload.sessionVersion >= 0 &&
     isUserRole(payload.role)
   );
 }

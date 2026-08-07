@@ -4,12 +4,14 @@ describe('RealtimeGateway', () => {
   const validPayload = {
     email: 'user@example.com',
     role: 'user',
+    sessionVersion: 0,
     sub: 'user-1',
     tokenType: 'access',
   };
   let configService: { getOrThrow: jest.Mock };
   let jwtService: { verifyAsync: jest.Mock };
   let gateway: RealtimeGateway;
+  let usersService: { findByIdForAccess: jest.Mock };
 
   beforeEach(() => {
     configService = {
@@ -20,10 +22,17 @@ describe('RealtimeGateway', () => {
       ),
     };
     jwtService = { verifyAsync: jest.fn().mockResolvedValue(validPayload) };
+    usersService = {
+      findByIdForAccess: jest.fn().mockResolvedValue({
+        isSuspended: false,
+        securityVersion: 0,
+      }),
+    };
     gateway = new RealtimeGateway(
       configService as never,
       jwtService as never,
       {} as never,
+      usersService as never,
     );
   });
 
@@ -68,6 +77,19 @@ describe('RealtimeGateway', () => {
 
   it('rejects invalid access tokens', async () => {
     jwtService.verifyAsync.mockRejectedValue(new Error('invalid token'));
+    const client = socket();
+
+    await gateway.handleConnection(client as never);
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('rejects a validly signed token after its sessions are revoked', async () => {
+    usersService.findByIdForAccess.mockResolvedValue({
+      isSuspended: false,
+      securityVersion: 1,
+    });
     const client = socket();
 
     await gateway.handleConnection(client as never);

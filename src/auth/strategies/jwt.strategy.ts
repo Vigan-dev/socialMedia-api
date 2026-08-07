@@ -8,10 +8,14 @@ import {
   isAccessTokenPayload,
   jwtIssuer,
 } from '../auth-token';
+import { UsersService } from '../../users/users.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private readonly usersService: UsersService,
+  ) {
     super({
       audience: accessTokenAudience,
       issuer: jwtIssuer,
@@ -24,15 +28,25 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: unknown) {
+  async validate(payload: unknown) {
     if (!isAccessTokenPayload(payload)) {
       throw new UnauthorizedException('Invalid access token');
     }
 
+    const user = await this.usersService.findByIdForAccess(payload.sub);
+
+    if (
+      !user ||
+      user.isSuspended ||
+      (user.securityVersion ?? 0) !== payload.sessionVersion
+    ) {
+      throw new UnauthorizedException('Session is no longer valid');
+    }
+
     return {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
     };
   }
 }

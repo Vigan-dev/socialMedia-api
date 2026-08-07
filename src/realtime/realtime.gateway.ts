@@ -20,6 +20,7 @@ import type {
   RealtimeSocketData,
 } from './realtime-events';
 import { RealtimePublisher } from './realtime.publisher';
+import { UsersService } from '../users/users.service';
 
 type RealtimeServer = Server<
   RealtimeClientEvents,
@@ -67,6 +68,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
     private readonly publisher: RealtimePublisher,
+    private readonly usersService: UsersService,
   ) {
     this.allowedOrigins = new Set(
       this.configService
@@ -108,6 +110,17 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
       });
 
       if (!isAccessTokenPayload(payload)) {
+        client.disconnect(true);
+        return;
+      }
+
+      const user = await this.usersService.findByIdForAccess(payload.sub);
+
+      if (
+        !user ||
+        user.isSuspended ||
+        (user.securityVersion ?? 0) !== payload.sessionVersion
+      ) {
         client.disconnect(true);
         return;
       }

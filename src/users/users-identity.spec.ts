@@ -65,7 +65,9 @@ describe('UsersService canonical identities', () => {
     expect(userModel.findOne).toHaveBeenCalledWith({
       emailLower: 'alice@example.com',
     });
-    expect(select).toHaveBeenCalledWith('+password');
+    expect(select).toHaveBeenCalledWith(
+      '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion',
+    );
   });
 
   it.each([

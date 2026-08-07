@@ -8,13 +8,16 @@ import { AuthService } from './auth.service';
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: {
+    changePassword: jest.Mock;
     getSessionUser: jest.Mock;
+    getSecurityActivity: jest.Mock;
     login: jest.Mock;
     logout: jest.Mock;
     refresh: jest.Mock;
     register: jest.Mock;
     requestPasswordReset: jest.Mock;
     resetPassword: jest.Mock;
+    revokeAllSessions: jest.Mock;
   };
   let response: {
     clearCookie: jest.Mock;
@@ -32,13 +35,16 @@ describe('AuthController', () => {
 
   beforeEach(async () => {
     authService = {
+      changePassword: jest.fn(),
       getSessionUser: jest.fn(),
+      getSecurityActivity: jest.fn(),
       login: jest.fn(),
       logout: jest.fn(),
       refresh: jest.fn(),
       register: jest.fn(),
       requestPasswordReset: jest.fn(),
       resetPassword: jest.fn(),
+      revokeAllSessions: jest.fn(),
     };
     response = {
       clearCookie: jest.fn(),
@@ -84,6 +90,7 @@ describe('AuthController', () => {
       'test@example.com',
       'Password1',
       false,
+      { ip: '127.0.0.1', userAgent: 'jest' },
     );
     expect(response.cookie).toHaveBeenCalledWith(
       'access_token',
@@ -178,6 +185,51 @@ describe('AuthController', () => {
     ).resolves.toEqual({ ok: true });
 
     expect(authService.logout).not.toHaveBeenCalled();
+    expect(response.clearCookie).toHaveBeenCalledTimes(2);
+  });
+
+  it('changes the password and clears the current browser cookies', async () => {
+    authService.changePassword.mockResolvedValue({ message: 'changed' });
+    const authenticatedRequest = {
+      ...request,
+      user: { id: 'user-1' },
+    } as unknown as Request;
+
+    await expect(
+      controller.changePassword(
+        {
+          currentPassword: 'Password1',
+          newPassword: 'NewPassword2',
+        },
+        authenticatedRequest,
+        response as Response,
+      ),
+    ).resolves.toEqual({ message: 'changed' });
+
+    expect(authService.changePassword).toHaveBeenCalledWith(
+      'user-1',
+      'Password1',
+      'NewPassword2',
+      { ip: '127.0.0.1', userAgent: 'jest' },
+    );
+    expect(response.clearCookie).toHaveBeenCalledTimes(2);
+  });
+
+  it('revokes every session and clears the current browser cookies', async () => {
+    authService.revokeAllSessions.mockResolvedValue({ message: 'revoked' });
+    const authenticatedRequest = {
+      ...request,
+      user: { id: 'user-1' },
+    } as unknown as Request;
+
+    await expect(
+      controller.logoutAll(authenticatedRequest, response as Response),
+    ).resolves.toEqual({ message: 'revoked' });
+
+    expect(authService.revokeAllSessions).toHaveBeenCalledWith('user-1', {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    });
     expect(response.clearCookie).toHaveBeenCalledTimes(2);
   });
 });

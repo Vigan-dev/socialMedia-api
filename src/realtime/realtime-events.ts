@@ -19,6 +19,7 @@ export interface RealtimeServerEvents {
   'message:read': (event: RealtimeMessageReadEvent) => void;
   'notification:new': (notification: NotificationResponse) => void;
   'notification:read-all': () => void;
+  'session:revoked': () => void;
 }
 
 export type RealtimeClientEvents = {

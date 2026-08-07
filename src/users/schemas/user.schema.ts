@@ -45,6 +45,18 @@ export class User {
   @Prop({ select: false })
   passwordResetExpiresAt?: Date;
 
+  @Prop({ default: 0, min: 0, select: false })
+  failedLoginAttempts!: number;
+
+  @Prop({ select: false })
+  failedLoginWindowStartedAt?: Date;
+
+  @Prop({ select: false })
+  loginLockedUntil?: Date;
+
+  @Prop({ default: 0, min: 0, select: false })
+  securityVersion!: number;
+
   @Prop({ type: String, enum: userRoles, default: 'user' })
   role!: UserRole;
 

@@ -2,7 +2,9 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
+import { getModelToken } from '@nestjs/mongoose';
 import * as bcrypt from 'bcrypt';
+import { Types } from 'mongoose';
 
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -13,6 +15,8 @@ import {
   jwtIssuer,
   refreshTokenAudience,
 } from './auth-token';
+import { AuthEvent } from './schemas/auth-event.schema';
+import { RealtimePublisher } from '../realtime/realtime.publisher';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -20,6 +24,7 @@ describe('AuthService', () => {
     clearRefreshTokenHash: jest.MockedFunction<
       (userId: string) => Promise<void>
     >;
+    clearFailedLoginState: jest.Mock;
     findByEmail: jest.MockedFunction<(email: string) => Promise<unknown>>;
     findByEmailWithPasswordReset: jest.MockedFunction<
       (email: string) => Promise<unknown>
@@ -27,11 +32,17 @@ describe('AuthService', () => {
     findByIdWithRefreshToken: jest.MockedFunction<
       (userId: string) => Promise<unknown>
     >;
+    findByIdWithPasswordAndSecurity: jest.Mock;
+    invalidateSessions: jest.Mock;
+    recordFailedLogin: jest.Mock;
     updateRefreshTokenHash: jest.MockedFunction<
       (userId: string, refreshTokenHash: string) => Promise<void>
     >;
     updatePasswordResetToken: jest.MockedFunction<
       (userId: string, tokenHash: string, expiresAt: Date) => Promise<void>
+    >;
+    updatePasswordAndInvalidateSessions: jest.MockedFunction<
+      (userId: string, password: string) => Promise<void>
     >;
     updatePasswordWithResetToken: jest.MockedFunction<
       (
@@ -59,9 +70,17 @@ describe('AuthService', () => {
       MailProvider['sendPasswordResetEmail']
     >;
   };
+  let authEventModel: {
+    create: jest.Mock;
+    find: jest.Mock;
+  };
+  let realtimePublisher: {
+    revokeUserSessions: jest.Mock;
+  };
 
   beforeEach(async () => {
     usersService = {
+      clearFailedLoginState: jest.fn(),
       clearRefreshTokenHash: jest.fn<Promise<void>, [userId: string]>(),
       findByEmail: jest.fn<Promise<unknown>, [email: string]>(),
       findByEmailWithPasswordReset: jest.fn<
@@ -69,6 +88,9 @@ describe('AuthService', () => {
         [email: string]
       >(),
       findByIdWithRefreshToken: jest.fn<Promise<unknown>, [userId: string]>(),
+      findByIdWithPasswordAndSecurity: jest.fn(),
+      invalidateSessions: jest.fn(),
+      recordFailedLogin: jest.fn(),
       updateRefreshTokenHash: jest.fn<
         Promise<void>,
         [userId: string, refreshTokenHash: string]
@@ -76,6 +98,10 @@ describe('AuthService', () => {
       updatePasswordResetToken: jest.fn<
         Promise<void>,
         [userId: string, tokenHash: string, expiresAt: Date]
+      >(),
+      updatePasswordAndInvalidateSessions: jest.fn<
+        Promise<void>,
+        [userId: string, password: string]
       >(),
       updatePasswordWithResetToken: jest.fn<
         Promise<boolean>,
@@ -109,6 +135,13 @@ describe('AuthService', () => {
     mailProvider = {
       sendPasswordResetEmail: jest.fn<Promise<void>, [email: unknown]>(),
     };
+    authEventModel = {
+      create: jest.fn(),
+      find: jest.fn(),
+    };
+    realtimePublisher = {
+      revokeUserSessions: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -129,6 +162,14 @@ describe('AuthService', () => {
           provide: MailProvider,
           useValue: mailProvider,
         },
+        {
+          provide: getModelToken(AuthEvent.name),
+          useValue: authEventModel,
+        },
+        {
+          provide: RealtimePublisher,
+          useValue: realtimePublisher,
+        },
       ],
     }).compile();
 
@@ -142,6 +183,7 @@ describe('AuthService', () => {
       isSuspended: false,
       password: await bcrypt.hash('Password1', 4),
       role: 'user',
+      securityVersion: 0,
     });
     jwtService.signAsync
       .mockResolvedValueOnce('access-token')
@@ -166,6 +208,7 @@ describe('AuthService', () => {
       {
         email: 'test@example.com',
         role: 'user',
+        sessionVersion: 0,
         sub: 'user-1',
         tokenType: 'access',
       },
@@ -193,6 +236,7 @@ describe('AuthService', () => {
 
   it('rejects login when the password is invalid', async () => {
     usersService.findByEmail.mockResolvedValue({
+      _id: { toString: () => 'user-1' },
       email: 'test@example.com',
       isSuspended: false,
       password: await bcrypt.hash('Password1', 4),
@@ -204,6 +248,25 @@ describe('AuthService', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
     expect(usersService.updateRefreshTokenHash).not.toHaveBeenCalled();
+    expect(usersService.recordFailedLogin).toHaveBeenCalled();
+  });
+
+  it('rejects login while the persistent account lock is active', async () => {
+    usersService.findByEmail.mockResolvedValue({
+      _id: { toString: () => 'user-1' },
+      email: 'test@example.com',
+      isSuspended: false,
+      loginLockedUntil: new Date(Date.now() + 60_000),
+      password: await bcrypt.hash('Password1', 4),
+      role: 'user',
+      securityVersion: 0,
+    });
+
+    await expect(
+      service.login('test@example.com', 'Password1'),
+    ).rejects.toMatchObject({ status: 429 });
+
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
   });
 
   it('refreshes a valid session and rotates the stored refresh token', async () => {
@@ -219,6 +282,7 @@ describe('AuthService', () => {
       isSuspended: false,
       refreshTokenHash: await bcrypt.hash('old-refresh-token', 4),
       role: 'moderator',
+      securityVersion: 0,
     });
     jwtService.signAsync
       .mockResolvedValueOnce('new-access-token')
@@ -245,6 +309,7 @@ describe('AuthService', () => {
       {
         email: 'current@example.com',
         role: 'moderator',
+        sessionVersion: 0,
         sub: 'user-1',
         tokenType: 'access',
       },
@@ -470,5 +535,47 @@ describe('AuthService', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
     expect(usersService.updatePasswordWithResetToken).not.toHaveBeenCalled();
+  });
+
+  it('changes the password and immediately invalidates every session', async () => {
+    const userId = new Types.ObjectId().toString();
+    const currentPasswordHash = await bcrypt.hash('Password1', 4);
+    usersService.findByIdWithPasswordAndSecurity.mockResolvedValue({
+      password: currentPasswordHash,
+    });
+
+    await expect(
+      service.changePassword(userId, 'Password1', 'NewPassword2', {
+        ip: '127.0.0.1',
+        userAgent: 'jest',
+      }),
+    ).resolves.toEqual({
+      message: 'Password changed. Sign in again on your devices.',
+    });
+
+    expect(
+      usersService.updatePasswordAndInvalidateSessions,
+    ).toHaveBeenCalledWith(userId, expect.any(String));
+    const passwordHash =
+      usersService.updatePasswordAndInvalidateSessions.mock.calls[0][1];
+    await expect(bcrypt.compare('NewPassword2', passwordHash)).resolves.toBe(
+      true,
+    );
+    expect(realtimePublisher.revokeUserSessions).toHaveBeenCalledWith(userId);
+    expect(authEventModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'password_changed' }),
+    );
+  });
+
+  it('increments the session version when all sessions are revoked', async () => {
+    const userId = new Types.ObjectId().toString();
+
+    await service.revokeAllSessions(userId, {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+    });
+
+    expect(usersService.invalidateSessions).toHaveBeenCalledWith(userId);
+    expect(realtimePublisher.revokeUserSessions).toHaveBeenCalledWith(userId);
   });
 });

@@ -12,6 +12,7 @@ import {
   type RateLimitOptions,
   type RateLimitRule,
 } from './rate-limit.decorator';
+import { getClientIp } from '../security/request-metadata';
 
 type RateLimitBucket = {
   count: number;
@@ -157,17 +158,7 @@ export class RateLimitGuard implements CanActivate {
   }
 
   private getClientIp(request: RequestWithIp) {
-    const forwardedFor = request.headers['x-forwarded-for'];
-    const firstForwardedIp = Array.isArray(forwardedFor)
-      ? forwardedFor[0]
-      : forwardedFor?.split(',')[0];
-
-    return (
-      firstForwardedIp?.trim() ||
-      request.ip ||
-      request.socket.remoteAddress ||
-      'unknown'
-    );
+    return getClientIp(request as Request);
   }
 
   private pruneExpiredBuckets(now: number) {

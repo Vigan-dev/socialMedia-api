@@ -2,18 +2,31 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { json, static as serveStatic, urlencoded } from 'express';
+import type { Express } from 'express';
 import { join } from 'node:path';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 import { createSameOriginWriteMiddleware } from './security/same-origin-write.middleware';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  const expressApp = app.getHttpAdapter().getInstance() as unknown as Express;
+  expressApp.set(
+    'trust proxy',
+    Number(configService.getOrThrow<string>('TRUST_PROXY_HOPS')),
+  );
   const clientOrigins = configService
     .getOrThrow<string>('CLIENT_ORIGINS')
     .split(',');
 
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(cookieParser());
   app.use(createSameOriginWriteMiddleware(clientOrigins));
   app.use('/uploads', serveStatic(join(process.cwd(), 'uploads')));
