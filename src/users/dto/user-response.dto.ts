@@ -19,6 +19,7 @@ export type UserProfileResponse = {
   followersCount: number;
   followingCount: number;
   id: string;
+  isEmailVerified: boolean;
   notificationSettings: NotificationSettingsResponse;
   profileVisibility: ProfileVisibility;
   privacy: {
@@ -28,6 +29,7 @@ export type UserProfileResponse = {
   role: string;
   showOnlineStatus: boolean;
   status: UserStatus;
+  twoFactorEnabled: boolean;
   username: string;
 };
 

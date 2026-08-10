@@ -20,6 +20,8 @@ describe('PostSchema validation', () => {
     await expect(post.validate()).resolves.toBeUndefined();
     expect(post.savedBy).toEqual([]);
     expect(post.hashtags).toEqual([]);
+    expect(post.isPinned).toBe(false);
+    expect(post.repostsCount).toBe(0);
   });
 
   it('derives normalized hashtags during validation', async () => {
@@ -54,5 +56,17 @@ describe('PostSchema validation', () => {
     await expect(post.validate()).rejects.toThrow(
       'Post content or media is required',
     );
+  });
+
+  it('allows a content-free repost that references an original post', async () => {
+    const post = new PostValidationModel({
+      author,
+      content: '',
+      mediaUrls: [],
+      repostOf: new Types.ObjectId(),
+      repostType: 'repost',
+    });
+
+    await expect(post.validate()).resolves.toBeUndefined();
   });
 });

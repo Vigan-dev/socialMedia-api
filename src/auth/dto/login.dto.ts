@@ -20,4 +20,9 @@ export class LoginDto {
   @IsOptional()
   @IsBoolean()
   rememberMe?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  twoFactorCode?: string;
 }

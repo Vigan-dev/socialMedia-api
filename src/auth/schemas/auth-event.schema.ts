@@ -9,6 +9,10 @@ export const AUTH_EVENT_TYPES = [
   'password_changed',
   'password_reset',
   'sessions_revoked',
+  'email_verified',
+  'two_factor_enabled',
+  'two_factor_disabled',
+  'two_factor_failure',
 ] as const;
 
 export type AuthEventType = (typeof AUTH_EVENT_TYPES)[number];

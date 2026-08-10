@@ -63,6 +63,34 @@ describe('SmtpMailProvider', () => {
     expect(mailOptions.html).toContain('30 minutes');
   });
 
+  it('sends an email-verification link without exposing raw HTML', async () => {
+    const provider = createProvider({
+      MAIL_FROM: 'SocialMedia <no-reply@example.com>',
+      NODE_ENV: 'production',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PASSWORD: 'secret',
+      SMTP_PORT: '587',
+      SMTP_USER: 'mailer',
+    });
+    const verificationUrl =
+      'https://app.example.com/verify-email?email=user%40example.com&token=abc&next=<script>';
+
+    await provider.sendEmailVerificationEmail({
+      expiresInHours: 1,
+      to: 'user@example.com',
+      verificationUrl,
+    });
+
+    const [mailOptions] = sendMail.mock.calls[0];
+    expect(mailOptions).toMatchObject({
+      subject: 'Verify your SocialMedia email',
+      to: 'user@example.com',
+    });
+    expect(mailOptions.text).toContain(verificationUrl);
+    expect(mailOptions.html).toContain('&lt;script&gt;');
+    expect(mailOptions.html).not.toContain('<script>');
+  });
+
   it('fails outside development and test when SMTP is unavailable', async () => {
     const provider = createProvider({ NODE_ENV: 'production' });
 

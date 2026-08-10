@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -449,6 +450,14 @@ export class PostsService {
         'author',
         'username email avatarUrl followers isSuspended profileVisibility',
       )
+      .populate(
+        'repostOf',
+        'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      )
+      .populate(
+        'repostOf.author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
       .populate<{
         comments: PopulatedComment[];
       }>(
@@ -528,12 +537,20 @@ export class PostsService {
         ...this.getPublicPostFilter(visibility.viewerObjectId),
         author: author._id,
       })
-      .sort({ createdAt: -1 })
+      .sort({ isPinned: -1, createdAt: -1 })
       .limit(50)
       .populate<{
         author: PopulatedAuthor;
       }>(
         'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
+      .populate(
+        'repostOf',
+        'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      )
+      .populate(
+        'repostOf.author',
         'username email avatarUrl followers isSuspended profileVisibility',
       )
       .populate<{
@@ -606,6 +623,120 @@ export class PostsService {
       mapPostDocumentToFeedModel(populatedPost),
       user.id,
     );
+  }
+
+  async createRepost(
+    postId: string,
+    quote: string | undefined,
+    user: AuthUser,
+  ): Promise<FeedPostResponse> {
+    const original = await this.findAccessiblePostOrThrow(postId, user.id);
+    if (original.repostOf) {
+      throw new BadRequestException('Repost the original post instead');
+    }
+    const originalAuthor = await this.userModel
+      .findById(original.author)
+      .select('profileVisibility')
+      .exec();
+
+    if (!originalAuthor || originalAuthor.profileVisibility === 'private') {
+      throw new ForbiddenException('Private posts cannot be reposted');
+    }
+
+    const content = quote?.trim() ?? '';
+    if (content.length > 500) {
+      throw new BadRequestException('Quote must be 500 characters or less');
+    }
+
+    let repost: PostDocument;
+    try {
+      repost = await this.postModel.create({
+        author: new Types.ObjectId(user.id),
+        content,
+        mediaUrls: [],
+        repostOf: original._id,
+        repostType: content ? 'quote' : 'repost',
+      });
+    } catch (error) {
+      const errorCode =
+        error && typeof error === 'object' && 'code' in error
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (errorCode === 11000) {
+        throw new ConflictException('You already reposted this post');
+      }
+      throw error;
+    }
+
+    await this.postModel.updateOne(
+      { _id: original._id },
+      {
+        $addToSet: { repostedBy: new Types.ObjectId(user.id) },
+        $inc: { repostsCount: 1 },
+      },
+    );
+    await this.notificationsService.create({
+      actorId: user.id,
+      content,
+      postId,
+      recipientId: original.author.toString(),
+      type: 'repost',
+    });
+
+    return this.populateAndMap(repost, user.id);
+  }
+
+  async removeRepost(postId: string, user: AuthUser) {
+    if (!Types.ObjectId.isValid(postId)) {
+      throw new BadRequestException('Invalid post id');
+    }
+
+    const originalId = new Types.ObjectId(postId);
+    const repost = await this.postModel.findOneAndDelete({
+      author: new Types.ObjectId(user.id),
+      repostOf: originalId,
+    });
+
+    if (!repost) throw new NotFoundException('Repost not found');
+
+    await this.postModel.updateOne(
+      { _id: originalId, repostsCount: { $gt: 0 } },
+      {
+        $inc: { repostsCount: -1 },
+        $pull: { repostedBy: new Types.ObjectId(user.id) },
+      },
+    );
+    await this.savedPostsService.removeDeletedPost(repost._id.toString());
+
+    return { id: repost._id.toString(), ok: true };
+  }
+
+  async pinPost(postId: string, user: AuthUser) {
+    const post = await this.findPostOrThrow(postId);
+    if (post.author.toString() !== user.id) {
+      throw new ForbiddenException('You can only pin your own posts');
+    }
+
+    await this.postModel.updateMany(
+      { author: new Types.ObjectId(user.id), isPinned: true },
+      { $set: { isPinned: false } },
+    );
+    post.isPinned = true;
+    await post.save();
+
+    return this.populateAndMap(post, user.id);
+  }
+
+  async unpinPost(postId: string, user: AuthUser) {
+    const post = await this.findPostOrThrow(postId);
+    if (post.author.toString() !== user.id) {
+      throw new ForbiddenException('You can only unpin your own posts');
+    }
+
+    post.isPinned = false;
+    await post.save();
+
+    return this.populateAndMap(post, user.id);
   }
 
   async setLike(
@@ -735,6 +866,34 @@ export class PostsService {
     }
 
     await post.deleteOne();
+    if (post.repostOf) {
+      await this.postModel.updateOne(
+        { _id: post.repostOf, repostsCount: { $gt: 0 } },
+        {
+          $inc: { repostsCount: -1 },
+          $pull: { repostedBy: new Types.ObjectId(user.id) },
+        },
+      );
+    }
+    const pureReposts = await this.postModel
+      .find({ repostOf: post._id, repostType: 'repost' })
+      .select('_id')
+      .lean()
+      .exec();
+    await Promise.all([
+      this.postModel.deleteMany({ repostOf: post._id, repostType: 'repost' }),
+      this.postModel.updateMany(
+        { repostOf: post._id, repostType: 'quote' },
+        { $unset: { repostOf: '', repostType: '' } },
+      ),
+      ...pureReposts.flatMap((repost) => {
+        const repostId = repost._id.toString();
+        return [
+          this.notificationsService.deleteForPost(repostId),
+          this.savedPostsService.removeDeletedPost(repostId),
+        ];
+      }),
+    ]);
     await Promise.all([
       this.notificationsService.deleteForPost(postId),
       this.savedPostsService.removeDeletedPost(postId),
@@ -1051,6 +1210,14 @@ export class PostsService {
         'author',
         'username email avatarUrl followers isSuspended profileVisibility',
       )
+      .populate(
+        'repostOf',
+        'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      )
+      .populate(
+        'repostOf.author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
       .populate<{
         comments: PopulatedComment[];
       }>(
@@ -1145,6 +1312,16 @@ export class PostsService {
     const populatedPost = await post.populate([
       {
         path: 'author',
+        select:
+          'username email avatarUrl followers isSuspended profileVisibility',
+      },
+      {
+        path: 'repostOf',
+        select:
+          'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      },
+      {
+        path: 'repostOf.author',
         select:
           'username email avatarUrl followers isSuspended profileVisibility',
       },
@@ -1344,6 +1521,14 @@ export class PostsService {
         author: PopulatedAuthor;
       }>(
         'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
+      .populate(
+        'repostOf',
+        'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      )
+      .populate(
+        'repostOf.author',
         'username email avatarUrl followers isSuspended profileVisibility',
       )
       .populate<{

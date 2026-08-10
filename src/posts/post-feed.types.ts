@@ -44,4 +44,9 @@ export type PostWithAuthor = {
   mediaUrls?: string[];
   isArchived?: boolean;
   isHidden?: boolean;
+  isPinned?: boolean;
+  repostedBy?: Types.ObjectId[];
+  repostOf?: PostWithAuthor | null;
+  repostsCount?: number;
+  repostType?: 'quote' | 'repost';
 };

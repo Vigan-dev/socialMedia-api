@@ -72,6 +72,14 @@ export class SavedPostsService {
         'author',
         'username email avatarUrl followers isSuspended profileVisibility',
       )
+      .populate(
+        'repostOf',
+        'author content createdAt hiddenBy hashtags isArchived isHidden mediaUrls',
+      )
+      .populate(
+        'repostOf.author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
       .populate<{
         comments: PopulatedComment[];
       }>(

@@ -238,6 +238,7 @@ export class NotificationsService {
   private getMeta(type: NotificationType) {
     if (type === 'like') return 'liked your post.';
     if (type === 'comment') return 'commented on your post.';
+    if (type === 'repost') return 'reposted your post.';
     if (type === 'follow') return 'started following you.';
     if (type === 'follow_request') return 'requested to follow you.';
     if (type === 'follow_accept') return 'accepted your follow request.';
@@ -248,7 +249,7 @@ export class NotificationsService {
   private allowsNotification(user: UserDocument, type: NotificationType) {
     const settings = user.notificationSettings;
 
-    if (type === 'like') return settings?.likes ?? true;
+    if (type === 'like' || type === 'repost') return settings?.likes ?? true;
     if (type === 'comment') return settings?.comments ?? true;
     if (
       type === 'follow' ||

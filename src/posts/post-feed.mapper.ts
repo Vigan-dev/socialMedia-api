@@ -28,6 +28,11 @@ export class PostFeedMapper {
   ): FeedPostResponse {
     const authorName = post.author?.username ?? 'Unknown User';
     const createdAt = post.createdAt ?? new Date();
+    const repost = this.toRepostResponse(
+      post.repostOf,
+      currentUserId,
+      hiddenAuthorIds,
+    );
 
     return {
       id: post._id.toString(),
@@ -45,6 +50,9 @@ export class PostFeedMapper {
       ...(recommendationReasons
         ? { recommendation: { reasons: recommendationReasons } }
         : {}),
+      ...(repost ? { repost } : {}),
+      reposts: post.repostsCount ?? 0,
+      repostType: post.repostType,
       comments:
         post.commentsCount ?? this.countResponseComments(post.comments ?? []),
       commentItems: (post.comments ?? [])
@@ -86,6 +94,8 @@ export class PostFeedMapper {
       isOwnPost: currentUserId
         ? post.author?._id?.toString() === currentUserId
         : false,
+      isPinned: post.isPinned ?? false,
+      isReposted: this.isRepostedByViewer(post.repostedBy, currentUserId),
       isFollowing: currentUserId
         ? Boolean(
             post.author?.followers?.some(
@@ -131,6 +141,10 @@ export class PostFeedMapper {
       id: feedPost.id,
       likes: feedPost.likes,
       mediaUrls: feedPost.mediaUrls,
+      isPinned: feedPost.isPinned,
+      repost: feedPost.repost,
+      reposts: feedPost.reposts,
+      repostType: feedPost.repostType,
       time: feedPost.time,
       user: feedPost.user,
     };
@@ -207,5 +221,44 @@ export class PostFeedMapper {
           (savedUserId) => savedUserId.toString() === currentUserId,
         )
       : false;
+  }
+
+  private isRepostedByViewer(
+    repostedBy: Types.ObjectId[] | undefined,
+    currentUserId?: string,
+  ) {
+    return currentUserId
+      ? (repostedBy ?? []).some((id) => id.toString() === currentUserId)
+      : false;
+  }
+
+  private toRepostResponse(
+    repost: PostWithAuthor | null | undefined,
+    currentUserId: string | undefined,
+    hiddenAuthorIds: Set<string>,
+  ) {
+    if (
+      !repost?.author ||
+      repost.isArchived ||
+      repost.isHidden ||
+      !this.isVisibleToViewer({
+        author: repost.author,
+        currentUserId,
+        hiddenAuthorIds,
+        hiddenBy: repost.hiddenBy,
+      })
+    ) {
+      return undefined;
+    }
+
+    const username = repost.author.username;
+    return {
+      content: repost.content,
+      handle: `@${username.toLowerCase().replace(/\s+/g, '_')}`,
+      id: repost._id.toString(),
+      mediaUrls: repost.mediaUrls ?? [],
+      time: (repost.createdAt ?? new Date()).toISOString(),
+      user: username,
+    };
   }
 }

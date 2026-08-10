@@ -132,6 +132,12 @@ export function validateEnvironment(config: Environment) {
 
   config.JWT_SECRET = jwtSecret;
 
+  const totpEncryptionKey = config.TOTP_ENCRYPTION_KEY?.trim();
+  if (totpEncryptionKey && totpEncryptionKey.length < 32) {
+    throw new Error('TOTP_ENCRYPTION_KEY must be at least 32 characters');
+  }
+  config.TOTP_ENCRYPTION_KEY = totpEncryptionKey;
+
   if (
     !mongodbUri.startsWith('mongodb://') &&
     !mongodbUri.startsWith('mongodb+srv://')

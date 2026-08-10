@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
-import { MailProvider, type PasswordResetEmail } from './mail.provider';
+import {
+  type EmailVerificationEmail,
+  MailProvider,
+  type PasswordResetEmail,
+} from './mail.provider';
 
 @Injectable()
 export class SmtpMailProvider implements MailProvider {
@@ -40,20 +44,10 @@ export class SmtpMailProvider implements MailProvider {
   }
 
   async sendPasswordResetEmail(email: PasswordResetEmail): Promise<void> {
-    if (!this.transporter || !this.from) {
-      if (['development', 'test'].includes(this.nodeEnvironment ?? '')) {
-        this.logger.warn(
-          'SMTP is not configured; password reset email delivery was skipped in development/test mode.',
-        );
-        return;
-      }
-
-      throw new Error('SMTP mail provider is not configured');
-    }
-
+    if (!this.assertMailAvailable('password reset')) return;
     const safeResetUrl = escapeHtml(email.resetUrl);
 
-    await this.transporter.sendMail({
+    await this.transporter!.sendMail({
       from: this.from,
       html: [
         '<p>We received a request to reset your SocialMedia password.</p>',
@@ -70,6 +64,46 @@ export class SmtpMailProvider implements MailProvider {
       ].join('\n'),
       to: email.to,
     });
+  }
+
+  async sendEmailVerificationEmail(
+    email: EmailVerificationEmail,
+  ): Promise<void> {
+    if (!this.assertMailAvailable('email verification')) return;
+    const safeVerificationUrl = escapeHtml(email.verificationUrl);
+
+    await this.transporter!.sendMail({
+      from: this.from,
+      html: [
+        '<p>Verify your email to finish setting up your SocialMedia account.</p>',
+        `<p><a href="${safeVerificationUrl}">Verify your email</a></p>`,
+        `<p>This link expires in ${email.expiresInHours} hours.</p>`,
+      ].join(''),
+      subject: 'Verify your SocialMedia email',
+      text: [
+        'Verify your email to finish setting up your SocialMedia account.',
+        '',
+        `Verify your email: ${email.verificationUrl}`,
+        '',
+        `This link expires in ${email.expiresInHours} hours.`,
+      ].join('\n'),
+      to: email.to,
+    });
+  }
+
+  private assertMailAvailable(purpose: string) {
+    if (!this.transporter || !this.from) {
+      if (['development', 'test'].includes(this.nodeEnvironment ?? '')) {
+        this.logger.warn(
+          `SMTP is not configured; ${purpose} email delivery was skipped in development/test mode.`,
+        );
+        return false;
+      }
+
+      throw new Error('SMTP mail provider is not configured');
+    }
+
+    return true;
   }
 }
 

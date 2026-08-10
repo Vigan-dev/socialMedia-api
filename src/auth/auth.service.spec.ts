@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
@@ -17,6 +17,11 @@ import {
 } from './auth-token';
 import { AuthEvent } from './schemas/auth-event.schema';
 import { RealtimePublisher } from '../realtime/realtime.publisher';
+import {
+  encryptTotpSecret,
+  generateTotpCode,
+  generateTotpSecret,
+} from './totp';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -25,15 +30,21 @@ describe('AuthService', () => {
       (userId: string) => Promise<void>
     >;
     clearFailedLoginState: jest.Mock;
+    create: jest.MockedFunction<UsersService['create']>;
+    disableTwoFactorAndInvalidateSessions: jest.Mock;
+    enableTwoFactor: jest.Mock;
     findByEmail: jest.MockedFunction<(email: string) => Promise<unknown>>;
     findByEmailWithPasswordReset: jest.MockedFunction<
       (email: string) => Promise<unknown>
     >;
+    findByEmailWithVerification: jest.Mock;
+    findByIdForTwoFactor: jest.Mock;
     findByIdWithRefreshToken: jest.MockedFunction<
       (userId: string) => Promise<unknown>
     >;
     findByIdWithPasswordAndSecurity: jest.Mock;
     invalidateSessions: jest.Mock;
+    removeTwoFactorRecoveryCode: jest.Mock;
     recordFailedLogin: jest.Mock;
     updateRefreshTokenHash: jest.MockedFunction<
       (userId: string, refreshTokenHash: string) => Promise<void>
@@ -41,6 +52,7 @@ describe('AuthService', () => {
     updatePasswordResetToken: jest.MockedFunction<
       (userId: string, tokenHash: string, expiresAt: Date) => Promise<void>
     >;
+    updateEmailVerificationToken: jest.Mock;
     updatePasswordAndInvalidateSessions: jest.MockedFunction<
       (userId: string, password: string) => Promise<void>
     >;
@@ -51,6 +63,10 @@ describe('AuthService', () => {
         passwordResetTokenHash: string,
       ) => Promise<boolean>
     >;
+    storePendingTwoFactorSecret: jest.MockedFunction<
+      UsersService['storePendingTwoFactorSecret']
+    >;
+    verifyEmail: jest.Mock;
   };
   let jwtService: {
     signAsync: jest.MockedFunction<
@@ -66,6 +82,7 @@ describe('AuthService', () => {
     getOrThrow: jest.MockedFunction<(key: string) => string>;
   };
   let mailProvider: {
+    sendEmailVerificationEmail: jest.Mock;
     sendPasswordResetEmail: jest.MockedFunction<
       MailProvider['sendPasswordResetEmail']
     >;
@@ -82,14 +99,23 @@ describe('AuthService', () => {
     usersService = {
       clearFailedLoginState: jest.fn(),
       clearRefreshTokenHash: jest.fn<Promise<void>, [userId: string]>(),
+      create: jest.fn<
+        ReturnType<UsersService['create']>,
+        Parameters<UsersService['create']>
+      >(),
+      disableTwoFactorAndInvalidateSessions: jest.fn(),
+      enableTwoFactor: jest.fn(),
       findByEmail: jest.fn<Promise<unknown>, [email: string]>(),
       findByEmailWithPasswordReset: jest.fn<
         Promise<unknown>,
         [email: string]
       >(),
+      findByEmailWithVerification: jest.fn(),
+      findByIdForTwoFactor: jest.fn(),
       findByIdWithRefreshToken: jest.fn<Promise<unknown>, [userId: string]>(),
       findByIdWithPasswordAndSecurity: jest.fn(),
       invalidateSessions: jest.fn(),
+      removeTwoFactorRecoveryCode: jest.fn(),
       recordFailedLogin: jest.fn(),
       updateRefreshTokenHash: jest.fn<
         Promise<void>,
@@ -99,6 +125,7 @@ describe('AuthService', () => {
         Promise<void>,
         [userId: string, tokenHash: string, expiresAt: Date]
       >(),
+      updateEmailVerificationToken: jest.fn(),
       updatePasswordAndInvalidateSessions: jest.fn<
         Promise<void>,
         [userId: string, password: string]
@@ -107,6 +134,11 @@ describe('AuthService', () => {
         Promise<boolean>,
         [userId: string, password: string, passwordResetTokenHash: string]
       >(),
+      storePendingTwoFactorSecret: jest.fn<
+        ReturnType<UsersService['storePendingTwoFactorSecret']>,
+        Parameters<UsersService['storePendingTwoFactorSecret']>
+      >(),
+      verifyEmail: jest.fn(),
     };
     jwtService = {
       signAsync: jest.fn<
@@ -120,6 +152,7 @@ describe('AuthService', () => {
     };
     config = {
       CLIENT_ORIGIN: 'https://app.example.com',
+      JWT_SECRET: 'j'.repeat(32),
       NODE_ENV: 'test',
     };
     configService = {
@@ -133,6 +166,7 @@ describe('AuthService', () => {
       }),
     };
     mailProvider = {
+      sendEmailVerificationEmail: jest.fn(),
       sendPasswordResetEmail: jest.fn<Promise<void>, [email: unknown]>(),
     };
     authEventModel = {
@@ -232,6 +266,151 @@ describe('AuthService', () => {
     await expect(
       bcrypt.compare('refresh-token', refreshTokenHash),
     ).resolves.toBe(true);
+  });
+
+  it('registers an unverified account and emails a one-time verification link', async () => {
+    usersService.create.mockResolvedValue({
+      email: 'new@example.com',
+    } as never);
+
+    const result = await service.register(
+      'new-user',
+      'new@example.com',
+      'Password1',
+    );
+
+    expect(result.message).toContain('Verify your email');
+    expect(result.verificationToken).toEqual(expect.any(String));
+    expect(usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'new@example.com',
+        isEmailVerified: false,
+      }),
+    );
+    const createdUser = usersService.create.mock.calls[0][0];
+    expect(createdUser.emailVerificationExpiresAt).toBeInstanceOf(Date);
+    expect(typeof createdUser.emailVerificationTokenHash).toBe('string');
+    await expect(
+      bcrypt.compare(
+        result.verificationToken!,
+        createdUser.emailVerificationTokenHash!,
+      ),
+    ).resolves.toBe(true);
+    expect(mailProvider.sendEmailVerificationEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expiresInHours: 24,
+        to: 'new@example.com',
+      }),
+    );
+  });
+
+  it('rejects a valid password until the account email is verified', async () => {
+    usersService.findByEmail.mockResolvedValue({
+      _id: { toString: () => 'user-1' },
+      email: 'test@example.com',
+      isEmailVerified: false,
+      isSuspended: false,
+      password: await bcrypt.hash('Password1', 4),
+      role: 'user',
+    });
+
+    await expect(
+      service.login('test@example.com', 'Password1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
+  });
+
+  it('returns a second-factor challenge without creating a session', async () => {
+    usersService.findByEmail.mockResolvedValue({
+      _id: { toString: () => 'user-1' },
+      email: 'test@example.com',
+      isEmailVerified: true,
+      isSuspended: false,
+      password: await bcrypt.hash('Password1', 4),
+      role: 'user',
+      twoFactorEnabled: true,
+    });
+
+    await expect(
+      service.login('test@example.com', 'Password1'),
+    ).resolves.toEqual({ requiresTwoFactor: true });
+    expect(jwtService.signAsync).not.toHaveBeenCalled();
+    expect(usersService.updateRefreshTokenHash).not.toHaveBeenCalled();
+  });
+
+  it('consumes a recovery code once before creating a session', async () => {
+    const userId = new Types.ObjectId().toString();
+    const recoveryCode = 'ABCD-EFGH-IJKL';
+    const recoveryCodeHash = await bcrypt.hash(recoveryCode, 4);
+    usersService.findByEmail.mockResolvedValue({
+      _id: { toString: () => userId },
+      email: 'test@example.com',
+      isEmailVerified: true,
+      isSuspended: false,
+      password: await bcrypt.hash('Password1', 4),
+      role: 'user',
+      securityVersion: 0,
+      twoFactorEnabled: true,
+      twoFactorRecoveryCodeHashes: [recoveryCodeHash],
+      twoFactorSecretEncrypted: encryptTotpSecret(
+        generateTotpSecret(),
+        config.JWT_SECRET,
+      ),
+    });
+    usersService.removeTwoFactorRecoveryCode.mockResolvedValue(true);
+    jwtService.signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await expect(
+      service.login(
+        'test@example.com',
+        'Password1',
+        false,
+        { ip: '127.0.0.1', userAgent: 'jest' },
+        recoveryCode,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ accessToken: 'access-token' }),
+    );
+    expect(usersService.removeTwoFactorRecoveryCode).toHaveBeenCalledWith(
+      userId,
+      recoveryCodeHash,
+    );
+  });
+
+  it('enables TOTP only after a valid authenticator code', async () => {
+    const userId = new Types.ObjectId().toString();
+    const passwordHash = await bcrypt.hash('Password1', 4);
+    usersService.findByIdForTwoFactor.mockResolvedValueOnce({
+      email: 'test@example.com',
+      password: passwordHash,
+      twoFactorEnabled: false,
+    });
+
+    const setup = await service.setupTwoFactor(userId, 'Password1');
+    const encryptedSecret =
+      usersService.storePendingTwoFactorSecret.mock.calls[0][1];
+    usersService.findByIdForTwoFactor.mockResolvedValueOnce({
+      twoFactorEnabled: false,
+      twoFactorPendingSecretEncrypted: encryptedSecret,
+    });
+
+    const result = await service.confirmTwoFactor(
+      userId,
+      generateTotpCode(setup.secret),
+    );
+
+    expect(result.recoveryCodes).toHaveLength(8);
+    expect(new Set(result.recoveryCodes).size).toBe(8);
+    expect(usersService.enableTwoFactor).toHaveBeenCalledWith(
+      userId,
+      encryptedSecret,
+      expect.arrayContaining([expect.any(String)]),
+    );
+    expect(authEventModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'two_factor_enabled' }),
+    );
   });
 
   it('rejects login when the password is invalid', async () => {

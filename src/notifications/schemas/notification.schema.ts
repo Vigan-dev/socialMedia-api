@@ -11,7 +11,8 @@ export type NotificationType =
   | 'follow_request'
   | 'like'
   | 'mention'
-  | 'message';
+  | 'message'
+  | 'repost';
 
 @Schema({ timestamps: true })
 export class Notification {
@@ -32,6 +33,7 @@ export class Notification {
       'follow_request',
       'mention',
       'message',
+      'repost',
     ],
     required: true,
   })

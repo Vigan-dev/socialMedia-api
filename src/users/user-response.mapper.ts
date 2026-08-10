@@ -11,6 +11,7 @@ export class UserResponseMapper {
   toProfile(user: UserDocument): UserProfileResponse {
     return {
       id: this.getUserId(user),
+      isEmailVerified: user.isEmailVerified ?? true,
       username: user.username,
       email: user.email,
       role: user.role,
@@ -32,6 +33,7 @@ export class UserResponseMapper {
       },
       showOnlineStatus: user.showOnlineStatus ?? true,
       status: user.status ?? 'available',
+      twoFactorEnabled: user.twoFactorEnabled ?? false,
     };
   }
 

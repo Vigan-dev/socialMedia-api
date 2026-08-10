@@ -31,6 +31,13 @@ import {
   type AuthEventDocument,
   type AuthEventType,
 } from './schemas/auth-event.schema';
+import {
+  createTotpUri,
+  decryptTotpSecret,
+  encryptTotpSecret,
+  generateTotpSecret,
+  verifyTotpCode,
+} from './totp';
 
 type AuthSession = {
   accessToken: string;
@@ -46,6 +53,10 @@ const longRefreshTokenMaxAgeMs = 30 * 24 * 60 * 60 * 1000;
 const passwordResetTokenMaxAgeMs = 30 * 60 * 1000;
 const passwordResetTokenMaxAgeMinutes =
   passwordResetTokenMaxAgeMs / (60 * 1000);
+const emailVerificationTokenMaxAgeMs = 24 * 60 * 60 * 1000;
+const emailVerificationTokenMaxAgeHours =
+  emailVerificationTokenMaxAgeMs / (60 * 60 * 1000);
+const recoveryCodeCount = 8;
 const dummyPasswordHash =
   '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 const unknownRequestMetadata: RequestMetadata = {
@@ -75,13 +86,80 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    return this.usersService.create({
+    const verificationToken = randomBytes(32).toString('hex');
+    const user = await this.usersService.create({
       username,
       email,
       password: hashedPassword,
       role: 'user',
+      isEmailVerified: false,
+      emailVerificationExpiresAt: new Date(
+        Date.now() + emailVerificationTokenMaxAgeMs,
+      ),
+      emailVerificationTokenHash: await bcrypt.hash(verificationToken, 10),
     });
+
+    await this.sendEmailVerification(user.email, verificationToken);
+
+    return this.canExposeSecurityTokens()
+      ? {
+          message: 'Account created. Verify your email before signing in.',
+          verificationToken,
+        }
+      : { message: 'Account created. Verify your email before signing in.' };
+  }
+
+  async requestEmailVerification(email: string) {
+    const message =
+      'If an unverified account exists for that email, a verification link has been sent.';
+    const user = await this.usersService.findByEmailWithVerification(email);
+
+    if (!user || user.isEmailVerified) return { message };
+
+    const verificationToken = randomBytes(32).toString('hex');
+    await this.usersService.updateEmailVerificationToken(
+      user._id.toString(),
+      await bcrypt.hash(verificationToken, 10),
+      new Date(Date.now() + emailVerificationTokenMaxAgeMs),
+    );
+    await this.sendEmailVerification(user.email, verificationToken);
+
+    return this.canExposeSecurityTokens()
+      ? { message, verificationToken }
+      : { message };
+  }
+
+  async verifyEmail(email: string, token: string) {
+    const user = await this.usersService.findByEmailWithVerification(email);
+
+    if (user?.isEmailVerified) {
+      return { message: 'Email is already verified.' };
+    }
+
+    if (
+      !user?.emailVerificationTokenHash ||
+      !user.emailVerificationExpiresAt ||
+      user.emailVerificationExpiresAt.getTime() < Date.now() ||
+      !(await bcrypt.compare(token, user.emailVerificationTokenHash))
+    ) {
+      throw new UnauthorizedException('Invalid or expired verification link');
+    }
+
+    const didVerify = await this.usersService.verifyEmail(
+      user._id.toString(),
+      user.emailVerificationTokenHash,
+    );
+    if (!didVerify) {
+      throw new UnauthorizedException('Invalid or expired verification link');
+    }
+
+    await this.recordEvent(
+      user._id.toString(),
+      'email_verified',
+      unknownRequestMetadata,
+    );
+
+    return { message: 'Email verified. You can now sign in.' };
   }
 
   async login(
@@ -89,7 +167,8 @@ export class AuthService {
     password: string,
     rememberMe = false,
     metadata: RequestMetadata = unknownRequestMetadata,
-  ): Promise<AuthSession> {
+    twoFactorCode?: string,
+  ): Promise<AuthSession | { requiresTwoFactor: true }> {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
@@ -127,6 +206,29 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.isEmailVerified === false) {
+      throw new ForbiddenException('Verify your email before signing in');
+    }
+
+    if (user.twoFactorEnabled) {
+      if (!twoFactorCode?.trim()) {
+        return { requiresTwoFactor: true };
+      }
+
+      const isValidSecondFactor = await this.verifySecondFactor(
+        user,
+        twoFactorCode,
+      );
+      if (!isValidSecondFactor) {
+        await this.recordEvent(
+          user._id.toString(),
+          'two_factor_failure',
+          metadata,
+        );
+        throw new UnauthorizedException('Invalid two-factor code');
+      }
+    }
+
     const session = await this.createSession(
       user._id.toString(),
       user.email,
@@ -138,6 +240,100 @@ export class AuthService {
     await this.recordEvent(user._id.toString(), 'login_success', metadata);
 
     return session;
+  }
+
+  async setupTwoFactor(userId: string, password: string) {
+    const user = await this.usersService.findByIdForTwoFactor(userId);
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      throw new ForbiddenException('Current password is incorrect');
+    }
+    if (user.twoFactorEnabled) {
+      throw new BadRequestException('Two-factor authentication is enabled');
+    }
+
+    const secret = generateTotpSecret();
+    const encryptedSecret = encryptTotpSecret(
+      secret,
+      this.getTotpEncryptionKey(),
+    );
+    await this.usersService.storePendingTwoFactorSecret(
+      userId,
+      encryptedSecret,
+    );
+
+    return {
+      otpauthUri: createTotpUri({
+        account: user.email,
+        issuer: 'Versatile',
+        secret,
+      }),
+      secret,
+    };
+  }
+
+  async confirmTwoFactor(
+    userId: string,
+    code: string,
+    metadata: RequestMetadata = unknownRequestMetadata,
+  ) {
+    const user = await this.usersService.findByIdForTwoFactor(userId);
+
+    if (!user?.twoFactorPendingSecretEncrypted || user.twoFactorEnabled) {
+      throw new BadRequestException('Start two-factor setup first');
+    }
+
+    const secret = this.decryptTwoFactorSecret(
+      user.twoFactorPendingSecretEncrypted,
+    );
+    if (!verifyTotpCode(secret, code)) {
+      throw new UnauthorizedException('Invalid two-factor code');
+    }
+
+    const recoveryCodes = Array.from({ length: recoveryCodeCount }, () =>
+      this.generateRecoveryCode(),
+    );
+    const recoveryCodeHashes = await Promise.all(
+      recoveryCodes.map((recoveryCode) => bcrypt.hash(recoveryCode, 10)),
+    );
+    await this.usersService.enableTwoFactor(
+      userId,
+      user.twoFactorPendingSecretEncrypted,
+      recoveryCodeHashes,
+    );
+    await this.recordEvent(userId, 'two_factor_enabled', metadata);
+
+    return { recoveryCodes };
+  }
+
+  async disableTwoFactor(
+    userId: string,
+    password: string,
+    code: string,
+    metadata: RequestMetadata = unknownRequestMetadata,
+  ) {
+    const user = await this.usersService.findByIdForTwoFactor(userId);
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      throw new ForbiddenException('Current password is incorrect');
+    }
+    if (!user.twoFactorEnabled || !user.twoFactorSecretEncrypted) {
+      throw new BadRequestException('Two-factor authentication is not enabled');
+    }
+    if (
+      !verifyTotpCode(
+        this.decryptTwoFactorSecret(user.twoFactorSecretEncrypted),
+        code,
+      )
+    ) {
+      throw new UnauthorizedException('Invalid two-factor code');
+    }
+
+    await this.usersService.disableTwoFactorAndInvalidateSessions(userId);
+    await this.recordEvent(userId, 'two_factor_disabled', metadata);
+    this.realtimePublisher.revokeUserSessions(userId);
+
+    return { message: 'Two-factor authentication disabled. Sign in again.' };
   }
 
   async refresh(refreshToken: string): Promise<AuthSession> {
@@ -291,7 +487,7 @@ export class AuthService {
       to: user.email,
     });
 
-    return this.canExposePasswordResetToken()
+    return this.canExposeSecurityTokens()
       ? { message, resetToken }
       : { message };
   }
@@ -385,13 +581,82 @@ export class AuthService {
     };
   }
 
-  private canExposePasswordResetToken() {
+  private canExposeSecurityTokens() {
     const nodeEnvironment = this.configService
       .get<string>('NODE_ENV')
       ?.trim()
       .toLowerCase();
 
     return nodeEnvironment === 'development' || nodeEnvironment === 'test';
+  }
+
+  private async sendEmailVerification(email: string, token: string) {
+    const verificationUrl = new URL(
+      '/verify-email',
+      this.configService.getOrThrow<string>('CLIENT_ORIGIN'),
+    );
+    verificationUrl.searchParams.set('email', email);
+    verificationUrl.searchParams.set('token', token);
+
+    await this.mailProvider.sendEmailVerificationEmail({
+      expiresInHours: emailVerificationTokenMaxAgeHours,
+      to: email,
+      verificationUrl: verificationUrl.toString(),
+    });
+  }
+
+  private async verifySecondFactor(
+    user: {
+      _id: Types.ObjectId;
+      twoFactorRecoveryCodeHashes?: string[];
+      twoFactorSecretEncrypted?: string;
+    },
+    requestedCode: string,
+  ) {
+    if (
+      /^\d{6}$/.test(requestedCode.trim()) &&
+      user.twoFactorSecretEncrypted &&
+      verifyTotpCode(
+        this.decryptTwoFactorSecret(user.twoFactorSecretEncrypted),
+        requestedCode,
+      )
+    ) {
+      return true;
+    }
+
+    const normalizedRecoveryCode = requestedCode.trim().toUpperCase();
+    for (const recoveryCodeHash of user.twoFactorRecoveryCodeHashes ?? []) {
+      if (await bcrypt.compare(normalizedRecoveryCode, recoveryCodeHash)) {
+        const didConsumeRecoveryCode =
+          await this.usersService.removeTwoFactorRecoveryCode(
+            user._id.toString(),
+            recoveryCodeHash,
+          );
+        if (didConsumeRecoveryCode) return true;
+      }
+    }
+
+    return false;
+  }
+
+  private decryptTwoFactorSecret(encryptedSecret: string) {
+    try {
+      return decryptTotpSecret(encryptedSecret, this.getTotpEncryptionKey());
+    } catch {
+      throw new ForbiddenException('Two-factor configuration is invalid');
+    }
+  }
+
+  private getTotpEncryptionKey() {
+    return (
+      this.configService.get<string>('TOTP_ENCRYPTION_KEY')?.trim() ||
+      this.configService.getOrThrow<string>('JWT_SECRET')
+    );
+  }
+
+  private generateRecoveryCode() {
+    const raw = randomBytes(6).toString('hex').toUpperCase();
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
   }
 
   private async recordEvent(

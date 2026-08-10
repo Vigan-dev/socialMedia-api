@@ -6,6 +6,14 @@ const validBaseEnv = {
 };
 
 describe('validateEnvironment', () => {
+  it('rejects a short TOTP encryption key', () => {
+    expect(() =>
+      validateEnvironment({
+        ...validBaseEnv,
+        TOTP_ENCRYPTION_KEY: 'too-short',
+      }),
+    ).toThrow('TOTP_ENCRYPTION_KEY must be at least 32 characters');
+  });
   it('defaults client origins for local development', () => {
     const config = validateEnvironment({ ...validBaseEnv });
 

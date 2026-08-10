@@ -66,7 +66,7 @@ describe('UsersService canonical identities', () => {
       emailLower: 'alice@example.com',
     });
     expect(select).toHaveBeenCalledWith(
-      '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion',
+      '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion +twoFactorSecretEncrypted +twoFactorRecoveryCodeHashes',
     );
   });
 

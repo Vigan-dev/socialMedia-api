@@ -36,10 +36,15 @@ type PostDocumentObject = {
   hashtags?: string[];
   isArchived?: boolean;
   isHidden?: boolean;
+  isPinned?: boolean;
   likedBy?: Types.ObjectId[];
   mediaUrls?: string[];
   savedBy?: Types.ObjectId[];
   searchScore?: number;
+  repostedBy?: Types.ObjectId[];
+  repostOf?: Types.ObjectId | PostDocumentObject | null;
+  repostsCount?: number;
+  repostType?: 'quote' | 'repost';
 };
 
 function isPopulatedAuthor(
@@ -57,6 +62,38 @@ function isPopulatedAuthor(
 
 function mapAuthor(author: MaybePopulatedAuthor) {
   return isPopulatedAuthor(author) ? author : null;
+}
+
+function isPopulatedPost(
+  value: PostDocumentObject['repostOf'],
+): value is PostDocumentObject {
+  return Boolean(value) && !(value instanceof Types.ObjectId);
+}
+
+function mapPostObject(data: PostDocumentObject): PostWithAuthor {
+  return {
+    _id: data._id,
+    author: mapAuthor(data.author),
+    comments: (data.comments ?? []).map(mapComment),
+    commentsCount: data.commentsCount ?? 0,
+    content: data.content,
+    createdAt: data.createdAt,
+    hiddenBy: data.hiddenBy ?? [],
+    hashtags: data.hashtags ?? [],
+    isArchived: data.isArchived ?? false,
+    isHidden: data.isHidden ?? false,
+    isPinned: data.isPinned ?? false,
+    likedBy: data.likedBy ?? [],
+    mediaUrls: data.mediaUrls ?? [],
+    repostedBy: data.repostedBy ?? [],
+    repostOf: isPopulatedPost(data.repostOf)
+      ? mapPostObject(data.repostOf)
+      : null,
+    repostsCount: data.repostsCount ?? 0,
+    repostType: data.repostType,
+    savedBy: data.savedBy ?? [],
+    searchScore: data.searchScore,
+  };
 }
 
 function mapReply(reply: PostReplyObject): PopulatedReply {
@@ -82,22 +119,7 @@ export function mapPostDocumentToFeedModel(
 ): PostWithAuthor {
   const data = post.toObject<PostDocumentObject>({ depopulate: false });
 
-  return {
-    _id: data._id,
-    author: mapAuthor(data.author),
-    comments: (data.comments ?? []).map(mapComment),
-    commentsCount: data.commentsCount ?? 0,
-    content: data.content,
-    createdAt: data.createdAt,
-    hiddenBy: data.hiddenBy ?? [],
-    hashtags: data.hashtags ?? [],
-    isArchived: data.isArchived ?? false,
-    isHidden: data.isHidden ?? false,
-    likedBy: data.likedBy ?? [],
-    mediaUrls: data.mediaUrls ?? [],
-    savedBy: data.savedBy ?? [],
-    searchScore: data.searchScore,
-  };
+  return mapPostObject(data);
 }
 
 export function mapPostDocumentsToFeedModels(

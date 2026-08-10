@@ -7,6 +7,7 @@ export type PostDocument = HydratedDocument<Post>;
 
 type PostContentValidationContext = {
   mediaUrls?: string[];
+  repostOf?: Types.ObjectId;
 };
 
 function hasPostContentOrMedia(
@@ -18,7 +19,7 @@ function hasPostContentOrMedia(
     Array.isArray(this.mediaUrls) &&
     this.mediaUrls.some((url) => url.trim().length > 0);
 
-  return hasContent || hasMedia;
+  return hasContent || hasMedia || Boolean(this.repostOf);
 }
 
 @Schema({ _id: true, timestamps: true })
@@ -96,11 +97,26 @@ export class Post {
   @Prop({ type: [String], default: [] })
   hashtags!: string[];
 
+  @Prop({ type: Types.ObjectId, ref: Post.name })
+  repostOf?: Types.ObjectId;
+
+  @Prop({ type: String, enum: ['quote', 'repost'] })
+  repostType?: 'quote' | 'repost';
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
+  repostedBy!: Types.ObjectId[];
+
+  @Prop({ default: 0, min: 0 })
+  repostsCount!: number;
+
   @Prop({ default: false, index: true })
   isArchived!: boolean;
 
   @Prop({ default: false, index: true })
   isHidden!: boolean;
+
+  @Prop({ default: false, index: true })
+  isPinned!: boolean;
 
   @Prop({ type: [{ type: Types.ObjectId, ref: User.name }], default: [] })
   hiddenBy!: Types.ObjectId[];
@@ -120,6 +136,23 @@ PostSchema.index({ likedBy: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ savedBy: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ 'comments.author': 1, createdAt: -1, _id: -1 });
 PostSchema.index({ 'comments.replies.author': 1, createdAt: -1, _id: -1 });
+PostSchema.index(
+  { author: 1, repostOf: 1 },
+  {
+    name: 'post_author_repost_unique',
+    partialFilterExpression: { repostOf: { $exists: true } },
+    unique: true,
+  },
+);
+PostSchema.index({ repostOf: 1, createdAt: -1 });
+PostSchema.index(
+  { author: 1, isPinned: 1 },
+  {
+    name: 'post_author_single_pin_unique',
+    partialFilterExpression: { isPinned: true },
+    unique: true,
+  },
+);
 PostSchema.index(
   { content: 'text' },
   { default_language: 'english', name: 'post_content_text' },

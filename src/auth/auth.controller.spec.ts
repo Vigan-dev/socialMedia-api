@@ -91,6 +91,7 @@ describe('AuthController', () => {
       'Password1',
       false,
       { ip: '127.0.0.1', userAgent: 'jest' },
+      undefined,
     );
     expect(response.cookie).toHaveBeenCalledWith(
       'access_token',
@@ -110,6 +111,20 @@ describe('AuthController', () => {
         sameSite: 'lax',
       }),
     );
+  });
+
+  it('returns a two-factor challenge without setting session cookies', async () => {
+    authService.login.mockResolvedValue({ requiresTwoFactor: true });
+
+    await expect(
+      controller.login(
+        { email: 'test@example.com', password: 'Password1' },
+        request,
+        response as Response,
+      ),
+    ).resolves.toEqual({ requiresTwoFactor: true });
+
+    expect(response.cookie).not.toHaveBeenCalled();
   });
 
   it('logs failed login attempts without setting cookies', async () => {

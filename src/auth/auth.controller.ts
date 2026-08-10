@@ -19,6 +19,11 @@ import { RateLimit } from '../rate-limit/rate-limit.decorator';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { getRequestMetadata } from '../security/request-metadata';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
+import { TwoFactorSetupDto } from './dto/two-factor-setup.dto';
+import { TwoFactorCodeDto } from './dto/two-factor-code.dto';
+import { DisableTwoFactorDto } from './dto/disable-two-factor.dto';
 
 type RequestWithUser = Request & {
   user?: {
@@ -57,7 +62,13 @@ export class AuthController {
         body.password,
         body.rememberMe,
         metadata,
+        body.twoFactorCode,
       );
+
+      if ('requiresTwoFactor' in session) {
+        return session;
+      }
+
       this.logLoginAttempt(request, body.email, true);
       this.setSessionCookies(response, session);
 
@@ -66,6 +77,64 @@ export class AuthController {
       this.logLoginAttempt(request, body.email, false);
       throw error;
     }
+  }
+
+  @Post('verify-email')
+  @RateLimit({ keyPrefix: 'auth:verify-email', limit: 10, ttlMs: 15 * 60_000 })
+  verifyEmail(@Body() body: VerifyEmailDto) {
+    return this.authService.verifyEmail(body.email, body.token);
+  }
+
+  @Post('resend-verification')
+  @RateLimit({
+    keyPrefix: 'auth:resend-verification',
+    limit: 3,
+    ttlMs: 15 * 60_000,
+  })
+  resendVerification(@Body() body: ResendEmailVerificationDto) {
+    return this.authService.requestEmailVerification(body.email);
+  }
+
+  @Post('2fa/setup')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'auth:2fa-setup', limit: 5, ttlMs: 15 * 60_000 })
+  setupTwoFactor(
+    @Body() body: TwoFactorSetupDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.authService.setupTwoFactor(request.user!.id, body.password);
+  }
+
+  @Post('2fa/confirm')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'auth:2fa-confirm', limit: 10, ttlMs: 15 * 60_000 })
+  confirmTwoFactor(
+    @Body() body: TwoFactorCodeDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.authService.confirmTwoFactor(
+      request.user!.id,
+      body.code,
+      getRequestMetadata(request),
+    );
+  }
+
+  @Post('2fa/disable')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'auth:2fa-disable', limit: 5, ttlMs: 15 * 60_000 })
+  async disableTwoFactor(
+    @Body() body: DisableTwoFactorDto,
+    @Req() request: RequestWithUser,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.disableTwoFactor(
+      request.user!.id,
+      body.password,
+      body.code,
+      getRequestMetadata(request),
+    );
+    this.clearSessionCookies(response);
+    return result;
   }
 
   @Post('refresh')

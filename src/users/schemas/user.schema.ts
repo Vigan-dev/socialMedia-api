@@ -45,6 +45,27 @@ export class User {
   @Prop({ select: false })
   passwordResetExpiresAt?: Date;
 
+  @Prop({ default: true, index: true })
+  isEmailVerified!: boolean;
+
+  @Prop({ select: false })
+  emailVerificationTokenHash?: string;
+
+  @Prop({ select: false })
+  emailVerificationExpiresAt?: Date;
+
+  @Prop({ default: false })
+  twoFactorEnabled!: boolean;
+
+  @Prop({ select: false })
+  twoFactorSecretEncrypted?: string;
+
+  @Prop({ select: false })
+  twoFactorPendingSecretEncrypted?: string;
+
+  @Prop({ type: [String], default: [], select: false })
+  twoFactorRecoveryCodeHashes!: string[];
+
   @Prop({ default: 0, min: 0, select: false })
   failedLoginAttempts!: number;
 

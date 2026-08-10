@@ -20,6 +20,7 @@ import { CreatePostDto } from './dto/create-post.dto';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { RecommendationFeedbackDto } from './dto/recommendation-feedback.dto';
+import { CreateRepostDto } from './dto/create-repost.dto';
 import { PostsService } from './posts.service';
 
 type RequestWithUser = Request & {
@@ -133,6 +134,35 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   like(@Param('id') id: string, @Req() request: RequestWithUser) {
     return this.postsService.setLike(id, request.user!, true);
+  }
+
+  @Post(':id/repost')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({ keyPrefix: 'posts:repost', limit: 20, ttlMs: 60_000 })
+  repost(
+    @Param('id') id: string,
+    @Body() body: CreateRepostDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.createRepost(id, body.quote, request.user!);
+  }
+
+  @Delete(':id/repost')
+  @UseGuards(JwtAuthGuard)
+  removeRepost(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.removeRepost(id, request.user!);
+  }
+
+  @Put(':id/pin')
+  @UseGuards(JwtAuthGuard)
+  pin(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.pinPost(id, request.user!);
+  }
+
+  @Delete(':id/pin')
+  @UseGuards(JwtAuthGuard)
+  unpin(@Param('id') id: string, @Req() request: RequestWithUser) {
+    return this.postsService.unpinPost(id, request.user!);
   }
 
   @Delete(':id/like')

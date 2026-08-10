@@ -69,8 +69,14 @@ export class UsersService {
     return this.userModel
       .findOne({ emailLower: normalizeEmail(email) })
       .select(
-        '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion',
+        '+password +failedLoginAttempts +failedLoginWindowStartedAt +loginLockedUntil +securityVersion +twoFactorSecretEncrypted +twoFactorRecoveryCodeHashes',
       );
+  }
+
+  async findByEmailWithVerification(email: string) {
+    return this.userModel
+      .findOne({ emailLower: normalizeEmail(email) })
+      .select('+emailVerificationTokenHash +emailVerificationExpiresAt');
   }
 
   async findByEmailWithPasswordReset(email: string) {
@@ -91,6 +97,14 @@ export class UsersService {
 
   async findByIdWithPasswordAndSecurity(id: string) {
     return this.userModel.findById(id).select('+password +securityVersion');
+  }
+
+  async findByIdForTwoFactor(id: string) {
+    return this.userModel
+      .findById(id)
+      .select(
+        '+password +securityVersion +twoFactorSecretEncrypted +twoFactorPendingSecretEncrypted +twoFactorRecoveryCodeHashes',
+      );
   }
 
   async findByIdForAccess(id: string) {
@@ -193,6 +207,91 @@ export class UsersService {
     await this.userModel.updateOne(
       { _id: userId },
       { passwordResetTokenHash, passwordResetExpiresAt },
+    );
+  }
+
+  async updateEmailVerificationToken(
+    userId: string,
+    tokenHash: string,
+    expiresAt: Date,
+  ) {
+    await this.userModel.updateOne(
+      { _id: userId, isEmailVerified: { $ne: true } },
+      {
+        $set: {
+          emailVerificationExpiresAt: expiresAt,
+          emailVerificationTokenHash: tokenHash,
+        },
+      },
+    );
+  }
+
+  async verifyEmail(userId: string, tokenHash: string) {
+    const result = await this.userModel.updateOne(
+      {
+        _id: userId,
+        emailVerificationExpiresAt: { $gt: new Date() },
+        emailVerificationTokenHash: tokenHash,
+      },
+      {
+        $set: { isEmailVerified: true },
+        $unset: {
+          emailVerificationExpiresAt: '',
+          emailVerificationTokenHash: '',
+        },
+      },
+    );
+
+    return result.modifiedCount > 0;
+  }
+
+  async storePendingTwoFactorSecret(userId: string, encryptedSecret: string) {
+    await this.userModel.updateOne(
+      { _id: userId, twoFactorEnabled: { $ne: true } },
+      { $set: { twoFactorPendingSecretEncrypted: encryptedSecret } },
+    );
+  }
+
+  async enableTwoFactor(
+    userId: string,
+    encryptedSecret: string,
+    recoveryCodeHashes: string[],
+  ) {
+    await this.userModel.updateOne(
+      { _id: userId, twoFactorEnabled: { $ne: true } },
+      {
+        $set: {
+          twoFactorEnabled: true,
+          twoFactorRecoveryCodeHashes: recoveryCodeHashes,
+          twoFactorSecretEncrypted: encryptedSecret,
+        },
+        $unset: { twoFactorPendingSecretEncrypted: '' },
+      },
+    );
+  }
+
+  async removeTwoFactorRecoveryCode(userId: string, recoveryCodeHash: string) {
+    const result = await this.userModel.updateOne(
+      { _id: userId, twoFactorRecoveryCodeHashes: recoveryCodeHash },
+      { $pull: { twoFactorRecoveryCodeHashes: recoveryCodeHash } },
+    );
+
+    return result.modifiedCount > 0;
+  }
+
+  async disableTwoFactorAndInvalidateSessions(userId: string) {
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        $inc: { securityVersion: 1 },
+        $set: { twoFactorEnabled: false },
+        $unset: {
+          refreshTokenHash: '',
+          twoFactorPendingSecretEncrypted: '',
+          twoFactorRecoveryCodeHashes: '',
+          twoFactorSecretEncrypted: '',
+        },
+      },
     );
   }
 

@@ -40,12 +40,24 @@ export type FeedPostResponse = {
   isFollowing: boolean;
   isLiked: boolean;
   isOwnPost: boolean;
+  isPinned: boolean;
+  isReposted: boolean;
   isSaved: boolean;
   likes: number;
   mediaUrls: string[];
   recommendation?: {
     reasons: string[];
   };
+  repost?: {
+    content: string;
+    handle: string;
+    id: string;
+    mediaUrls: string[];
+    time: string;
+    user: string;
+  };
+  reposts: number;
+  repostType?: 'quote' | 'repost';
   time: string;
   user: string;
 };
@@ -57,6 +69,7 @@ export type PublicPostResponse = Omit<
   | 'isFollowing'
   | 'isLiked'
   | 'isOwnPost'
+  | 'isReposted'
   | 'isSaved'
   | 'recommendation'
 > & {
