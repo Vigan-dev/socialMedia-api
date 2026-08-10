@@ -33,6 +33,35 @@ type RequestWithUser = Request & {
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
+  @Get('discovery')
+  @UseGuards(JwtAuthGuard)
+  discover(
+    @Req() request: RequestWithUser,
+    @Query('limit') limit?: string,
+    @Query('tag') tag?: string,
+  ) {
+    return this.postsService.discover(request.user!.id, { limit, tag });
+  }
+
+  @Get('search')
+  @UseGuards(JwtAuthGuard)
+  search(
+    @Req() request: RequestWithUser,
+    @Query('q') query?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.postsService.search(request.user!.id, { limit, query });
+  }
+
+  @Get('topics/trending')
+  @UseGuards(JwtAuthGuard)
+  trendingTopics(
+    @Req() request: RequestWithUser,
+    @Query('limit') limit?: string,
+  ) {
+    return this.postsService.findTrendingTopics(request.user!.id, limit);
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard)
   findAll(

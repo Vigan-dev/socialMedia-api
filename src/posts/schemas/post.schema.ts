@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { User } from '../../users/schemas/user.schema';
+import { extractHashtags } from '../post-hashtags';
 
 export type PostDocument = HydratedDocument<Post>;
 
@@ -92,6 +93,9 @@ export class Post {
   @Prop({ type: [String], default: [] })
   mediaUrls!: string[];
 
+  @Prop({ type: [String], default: [] })
+  hashtags!: string[];
+
   @Prop({ default: false, index: true })
   isArchived!: boolean;
 
@@ -104,7 +108,15 @@ export class Post {
 
 export const PostSchema = SchemaFactory.createForClass(Post);
 
+PostSchema.pre('validate', function normalizePostHashtags() {
+  this.hashtags = extractHashtags(this.content ?? '');
+});
+
 PostSchema.index({ createdAt: -1, _id: -1 });
 PostSchema.index({ author: 1, createdAt: -1, _id: -1 });
+PostSchema.index({ hashtags: 1, createdAt: -1 });
 PostSchema.index({ hiddenBy: 1 });
+PostSchema.index({ likedBy: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ savedBy: 1, createdAt: -1, _id: -1 });
+PostSchema.index({ 'comments.author': 1, createdAt: -1, _id: -1 });
+PostSchema.index({ 'comments.replies.author': 1, createdAt: -1, _id: -1 });

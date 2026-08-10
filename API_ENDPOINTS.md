@@ -53,7 +53,7 @@ All user endpoints require authentication.
 
 | Method   | Path                                          | Description                                                                      |
 | -------- | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| `GET`    | `/users?limit=30&cursor=...`                  | List visible users ordered by username. Returns a cursor page.                   |
+| `GET`    | `/users?limit=30&cursor=...&q=name`           | List or prefix-search visible, non-suspended users by username. Returns a cursor page. |
 | `GET`    | `/users/me`                                   | Get the current user profile.                                                    |
 | `GET`    | `/users/me/followers?limit=30&cursor=...`     | Get the current user's followers as a cursor page.                               |
 | `GET`    | `/users/me/following?limit=30&cursor=...`     | Get users followed by the current user as a cursor page.                         |
@@ -80,7 +80,10 @@ All post endpoints require authentication.
 
 | Method   | Path                                                       | Description                                                                                                                                                                                              |
 | -------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/posts?feed=all&sort=latest&limit=12&cursor=...`          | Get the feed. `feed` can be `all` or `following`; `sort` can be `latest` or `trending`. `latest` uses cursor pagination. `trending` ranks a recent candidate window by engagement and does not paginate. |
+| `GET`    | `/posts?feed=all&sort=latest&limit=12&cursor=...`          | Get the feed. `feed` can be `all`, `following`, or `recommended`; `sort` can be `latest` or `trending`. Latest uses cursor pagination. Trending and recommended rank bounded candidate windows and do not paginate. |
+| `GET`    | `/posts/discovery?limit=12&tag=typescript`                 | Get privacy-safe discovery posts ranked by engagement and recency. `tag` is optional and accepts a value with or without `#`. |
+| `GET`    | `/posts/search?q=nestjs&limit=20`                           | Search discoverable post content across the database. Queries must contain 2–80 characters. |
+| `GET`    | `/posts/topics/trending?limit=8`                            | Get hashtags trending across discoverable posts from the last seven days. |
 | `POST`   | `/posts`                                                   | Create a post.                                                                                                                                                                                           |
 | `PUT`    | `/posts/:id/like`                                          | Ensure the current user likes the post. Idempotent.                                                                                                                                                      |
 | `DELETE` | `/posts/:id/like`                                          | Ensure the current user does not like the post. Idempotent.                                                                                                                                              |
@@ -94,6 +97,17 @@ All post endpoints require authentication.
 | `POST`   | `/posts/:postId/comments/:commentId/replies`               | Add a reply to a comment.                                                                                                                                                                                |
 | `PUT`    | `/posts/:postId/comments/:commentId/replies/:replyId/like` | Ensure the current user likes the reply. Idempotent.                                                                                                                                                     |
 | `DELETE` | `/posts/:postId/comments/:commentId/replies/:replyId/like` | Ensure the current user does not like the reply. Idempotent.                                                                                                                                             |
+
+Post hashtags are normalized, deduplicated, capped at ten per post, and stored
+in an indexed field. Discovery excludes suspended accounts, blocked or muted
+relationships, hidden content, and private-account posts the viewer cannot
+access before ranking or limiting results.
+
+The `recommended` feed builds a bounded preference profile from the current
+user's likes, saves, comments, replies, authored hashtags, followed creators,
+and prior creator interactions. It combines those signals with engagement and
+recency, penalizes already-interacted posts, excludes the viewer's own posts,
+and initially caps each creator at two results for diversity.
 
 ## Notifications
 

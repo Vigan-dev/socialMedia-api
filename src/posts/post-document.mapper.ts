@@ -33,6 +33,7 @@ type PostDocumentObject = {
   content: string;
   createdAt?: Date;
   hiddenBy?: Types.ObjectId[];
+  hashtags?: string[];
   isArchived?: boolean;
   isHidden?: boolean;
   likedBy?: Types.ObjectId[];
@@ -88,6 +89,7 @@ export function mapPostDocumentToFeedModel(
     content: data.content,
     createdAt: data.createdAt,
     hiddenBy: data.hiddenBy ?? [],
+    hashtags: data.hashtags ?? [],
     isArchived: data.isArchived ?? false,
     isHidden: data.isHidden ?? false,
     likedBy: data.likedBy ?? [],

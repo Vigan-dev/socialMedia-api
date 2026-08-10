@@ -308,8 +308,9 @@ async function seedPostsAndReports(users: DemoUsers) {
       ],
       commentsCount: 3,
       content:
-        'Seeded demo post: testing feed loading, likes, comments, replies, and reports.',
+        'Seeded demo post: testing feed loading, likes, comments, replies, and reports. #development #testing',
       createdAt: new Date(now - 1000 * 60 * 15),
+      hashtags: ['development', 'testing'],
       hiddenBy: [],
       likedBy: [users.casey._id, users.riley._id],
       updatedAt: new Date(now - 1000 * 60 * 12),
@@ -329,8 +330,9 @@ async function seedPostsAndReports(users: DemoUsers) {
       ],
       commentsCount: 1,
       content:
-        'Designer note: try the profile editor, avatar field, privacy toggles, and theme accent controls.',
+        'Designer note: try the profile editor, avatar field, privacy toggles, and theme accent controls. #design #privacy',
       createdAt: new Date(now - 1000 * 60 * 60 * 2),
+      hashtags: ['design', 'privacy'],
       hiddenBy: [],
       likedBy: [users.demo._id],
       updatedAt: new Date(now - 1000 * 60 * 60 * 2),
@@ -341,8 +343,9 @@ async function seedPostsAndReports(users: DemoUsers) {
       comments: [],
       commentsCount: 0,
       content:
-        'Admin demo: open the Admin tab to review users, metrics, reports, and moderation actions.',
+        'Admin demo: open the Admin tab to review users, metrics, reports, and moderation actions. #admin #moderation',
       createdAt: new Date(now - 1000 * 60 * 60 * 5),
+      hashtags: ['admin', 'moderation'],
       hiddenBy: [],
       likedBy: [users.demo._id, users.casey._id],
       updatedAt: new Date(now - 1000 * 60 * 60 * 5),
@@ -353,8 +356,9 @@ async function seedPostsAndReports(users: DemoUsers) {
       comments: [],
       commentsCount: 0,
       content:
-        'Visibility demo: demo_user has blocked this author, so this post should disappear for that account.',
+        'Visibility demo: demo_user has blocked this author, so this post should disappear for that account. #privacy',
       createdAt: new Date(now - 1000 * 60 * 60 * 8),
+      hashtags: ['privacy'],
       hiddenBy: [],
       likedBy: [],
       updatedAt: new Date(now - 1000 * 60 * 60 * 8),

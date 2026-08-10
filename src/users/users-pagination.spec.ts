@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { BadRequestException } from '@nestjs/common';
 
 import { UsersService } from './users.service';
 
@@ -62,6 +63,7 @@ describe('UsersService pagination and suggestions', () => {
 
     expect(userModel.find).toHaveBeenCalledWith({
       _id: { $nin: [viewerId, hiddenUserId] },
+      isSuspended: false,
     });
     expect(findQuery.sort).toHaveBeenCalledWith({ usernameLower: 1, _id: 1 });
     expect(findQuery.limit).toHaveBeenCalledWith(11);
@@ -85,6 +87,7 @@ describe('UsersService pagination and suggestions', () => {
         $match: {
           _id: { $nin: [viewerId, followedUserId, hiddenUserId] },
           followRequests: { $ne: viewerId },
+          isSuspended: false,
         },
       },
       {
@@ -98,6 +101,31 @@ describe('UsersService pagination and suggestions', () => {
       { $limit: 5 },
       { $project: { suggestionFollowerCount: 0 } },
     ]);
+    expect(userModel.find).not.toHaveBeenCalled();
+  });
+
+  it('uses a safe anchored username query for server-wide people search', async () => {
+    const viewerId = new Types.ObjectId();
+
+    await service.findAll(viewerId.toString(), {
+      limit: '10',
+      query: '@dev.*',
+    });
+
+    expect(userModel.find).toHaveBeenCalledWith({
+      _id: { $nin: [viewerId] },
+      isSuspended: false,
+      usernameLower: { $regex: '^dev\\.\\*' },
+    });
+  });
+
+  it('rejects user search queries larger than the username limit', async () => {
+    const viewerId = new Types.ObjectId();
+
+    await expect(
+      service.findAll(viewerId.toString(), { query: 'a'.repeat(51) }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
     expect(userModel.find).not.toHaveBeenCalled();
   });
 });

@@ -29,6 +29,12 @@ import type {
 import { isTrustedUploadUrl } from '../uploads/upload-url.validation';
 import { normalizeUsernameLower } from '../users/user-identity';
 import { SavedPostsService } from './saved-posts.service';
+import { isValidHashtag, normalizeHashtag } from './post-hashtags';
+import {
+  buildRecommendationProfile,
+  rankRecommendedPosts,
+} from './post-recommendation';
+import type { RecommendationSignal } from './post-recommendation';
 
 type AuthUser = {
   id: string;
@@ -47,6 +53,22 @@ type FeedPageResponse = {
   nextCursor: string | null;
 };
 
+type DiscoveryQuery = {
+  limit?: string;
+  tag?: string;
+};
+
+type SearchQuery = {
+  limit?: string;
+  query?: string;
+};
+
+type DiscoverablePostContext = {
+  filter: Record<string, unknown>;
+  followingIds: Types.ObjectId[];
+  hiddenAuthorIds: Set<string>;
+};
+
 type LatestFeedCursor = {
   createdAt: Date;
   id?: Types.ObjectId;
@@ -58,6 +80,17 @@ type PublicViewerContext = {
 };
 
 const recentTrendingWindowMultiplier = 3;
+const discoveryCandidateMultiplier = 6;
+const maxDiscoveryCandidates = 120;
+const trendingWindowDays = 7;
+
+function escapeRegularExpression(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseDiscoveryLimit(value?: string, fallback = 12) {
+  return Math.min(Math.max(Number(value) || fallback, 1), 30);
+}
 
 function decodeLatestFeedCursor(cursor: string): LatestFeedCursor {
   let decoded: unknown;
@@ -128,10 +161,124 @@ export class PostsService {
     private readonly savedPostsService: SavedPostsService,
   ) {}
 
+  async discover(
+    userId: string,
+    query: DiscoveryQuery = {},
+  ): Promise<FeedPostResponse[]> {
+    const limit = parseDiscoveryLimit(query.limit);
+    const tag = query.tag ? normalizeHashtag(query.tag) : '';
+
+    if (query.tag && !isValidHashtag(tag)) {
+      throw new BadRequestException('A valid topic is required');
+    }
+
+    const context = await this.getDiscoverablePostContext(userId);
+    const filter = tag
+      ? { $and: [context.filter, { hashtags: tag }] }
+      : context.filter;
+
+    return this.findRankedDiscoveryPosts(filter, context, userId, limit);
+  }
+
+  async search(
+    userId: string,
+    query: SearchQuery,
+  ): Promise<FeedPostResponse[]> {
+    const searchQuery = query.query?.trim() ?? '';
+
+    if (searchQuery.length < 2 || searchQuery.length > 80) {
+      throw new BadRequestException(
+        'Search query must be between 2 and 80 characters',
+      );
+    }
+
+    const context = await this.getDiscoverablePostContext(userId);
+    const normalizedTag = searchQuery.startsWith('#')
+      ? normalizeHashtag(searchQuery)
+      : '';
+    const contentExpression = new RegExp(
+      escapeRegularExpression(searchQuery),
+      'i',
+    );
+    const searchFilter = normalizedTag
+      ? {
+          $or: [{ hashtags: normalizedTag }, { content: contentExpression }],
+        }
+      : { content: contentExpression };
+
+    return this.findRankedDiscoveryPosts(
+      { $and: [context.filter, searchFilter] },
+      context,
+      userId,
+      parseDiscoveryLimit(query.limit, 20),
+      searchQuery,
+    );
+  }
+
+  async findTrendingTopics(userId: string, requestedLimit?: string) {
+    const limit = Math.min(parseDiscoveryLimit(requestedLimit, 8), 12);
+    const context = await this.getDiscoverablePostContext(userId);
+    const createdAt = {
+      $gte: new Date(Date.now() - trendingWindowDays * 24 * 60 * 60 * 1000),
+    };
+    const topics = await this.postModel
+      .aggregate<{
+        engagementCount: number;
+        postCount: number;
+        tag: string;
+      }>([
+        {
+          $match: {
+            ...context.filter,
+            createdAt,
+            hashtags: { $exists: true, $ne: [] },
+          },
+        },
+        { $unwind: '$hashtags' },
+        {
+          $group: {
+            _id: '$hashtags',
+            engagementCount: {
+              $sum: {
+                $add: [
+                  { $size: { $ifNull: ['$likedBy', []] } },
+                  { $ifNull: ['$commentsCount', 0] },
+                ],
+              },
+            },
+            postCount: { $sum: 1 },
+          },
+        },
+        { $sort: { postCount: -1, engagementCount: -1, _id: 1 } },
+        { $limit: limit },
+        {
+          $project: {
+            _id: 0,
+            engagementCount: 1,
+            postCount: 1,
+            tag: '$_id',
+          },
+        },
+      ])
+      .exec();
+
+    return topics.map((topic) => ({
+      ...topic,
+      id: topic.tag,
+      tag: `#${topic.tag}`,
+    }));
+  }
+
   async findAll(
     userId?: string,
     query: FeedQuery = {},
   ): Promise<FeedPageResponse> {
+    const limit = Math.min(Math.max(Number(query.limit) || 12, 1), 30);
+
+    if (query.feed === 'recommended' && userId) {
+      return this.findRecommendedFeed(userId, limit);
+    }
+
     const visibility = userId
       ? await this.relationshipService.getViewerVisibility(userId)
       : null;
@@ -139,7 +286,6 @@ export class PostsService {
     const feed = query.feed === 'following' ? 'following' : 'all';
     const sort =
       query.sort === 'trending' || query.sort === 'top' ? 'trending' : 'latest';
-    const limit = Math.min(Math.max(Number(query.limit) || 12, 1), 30);
     const cursor =
       sort === 'latest' && query.cursor
         ? decodeLatestFeedCursor(query.cursor)
@@ -907,6 +1053,162 @@ export class PostsService {
       mapPostDocumentToFeedModel(populatedPost),
       userId,
     );
+  }
+
+  private async getDiscoverablePostContext(
+    userId: string,
+  ): Promise<DiscoverablePostContext> {
+    const viewerObjectId = new Types.ObjectId(userId);
+    const visibility = await this.relationshipService.getViewerVisibility(
+      userId,
+      { requireViewer: true },
+    );
+    const hiddenAuthorObjectIds = [...visibility.hiddenUserIds]
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    const inaccessibleAuthorIds = await this.findInaccessibleAuthorIds(userId);
+    const excludedAuthorIds = Array.from(
+      new Map(
+        [...hiddenAuthorObjectIds, ...inaccessibleAuthorIds].map((id) => [
+          id.toString(),
+          id,
+        ]),
+      ).values(),
+    );
+
+    return {
+      filter: {
+        ...this.getPublicPostFilter(viewerObjectId),
+        ...(excludedAuthorIds.length
+          ? { author: { $nin: excludedAuthorIds } }
+          : {}),
+      },
+      followingIds: visibility.followingIds ?? [],
+      hiddenAuthorIds: visibility.hiddenUserIds,
+    };
+  }
+
+  private async findRecommendedFeed(
+    userId: string,
+    limit: number,
+  ): Promise<FeedPageResponse> {
+    const viewerObjectId = new Types.ObjectId(userId);
+    const context = await this.getDiscoverablePostContext(userId);
+    const signalDocuments = await this.postModel
+      .find({
+        $or: [
+          { author: viewerObjectId },
+          { likedBy: viewerObjectId },
+          { savedBy: viewerObjectId },
+          { 'comments.author': viewerObjectId },
+          { 'comments.replies.author': viewerObjectId },
+        ],
+        isArchived: { $ne: true },
+        isHidden: { $ne: true },
+      })
+      .select(
+        '_id author hashtags likedBy savedBy comments.author comments.replies.author',
+      )
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(100)
+      .exec();
+    const signals = signalDocuments.map((post) =>
+      post.toObject<RecommendationSignal>({ depopulate: true }),
+    );
+    const profile = buildRecommendationProfile({
+      followingIds: context.followingIds,
+      signals,
+      viewerId: userId,
+    });
+    const candidateFilter = {
+      $and: [context.filter, { author: { $ne: viewerObjectId } }],
+    };
+    const candidates = await this.findPopulatedPostCandidates(
+      candidateFilter,
+      Math.min(limit * 10, maxDiscoveryCandidates),
+    );
+    const rankedPosts = rankRecommendedPosts(candidates, profile, limit);
+
+    return {
+      hasMore: false,
+      items: rankedPosts.map((post) =>
+        this.postFeedMapper.toFeedPost(post, userId, context.hiddenAuthorIds),
+      ),
+      nextCursor: null,
+    };
+  }
+
+  private async findRankedDiscoveryPosts(
+    filter: Record<string, unknown>,
+    context: DiscoverablePostContext,
+    userId: string,
+    limit: number,
+    searchQuery = '',
+  ) {
+    const posts = await this.findPopulatedPostCandidates(
+      filter,
+      Math.min(limit * discoveryCandidateMultiplier, maxDiscoveryCandidates),
+    );
+    const normalizedSearch = searchQuery.toLocaleLowerCase('en-US');
+
+    return posts
+      .filter((post) => Boolean(post.author))
+      .sort((left, right) => {
+        const score = (post: PostWithAuthor) => {
+          const ageInHours = Math.max(
+            0,
+            (Date.now() - (post.createdAt?.getTime() ?? 0)) / 3_600_000,
+          );
+          const recencyScore = Math.max(0, 48 - ageInHours) / 8;
+          const exactTopicBoost =
+            normalizedSearch &&
+            post.content.toLocaleLowerCase('en-US').includes(normalizedSearch)
+              ? 10
+              : 0;
+
+          return (
+            this.postFeedMapper.scorePost(post) + recencyScore + exactTopicBoost
+          );
+        };
+
+        return (
+          score(right) - score(left) ||
+          (right.createdAt?.getTime() ?? 0) - (left.createdAt?.getTime() ?? 0)
+        );
+      })
+      .slice(0, limit)
+      .map((post) =>
+        this.postFeedMapper.toFeedPost(post, userId, context.hiddenAuthorIds),
+      );
+  }
+
+  private async findPopulatedPostCandidates(
+    filter: Record<string, unknown>,
+    candidateLimit: number,
+  ) {
+    const posts = await this.postModel
+      .find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(candidateLimit)
+      .populate<{
+        author: PopulatedAuthor;
+      }>(
+        'author',
+        'username email avatarUrl followers isSuspended profileVisibility',
+      )
+      .populate<{
+        comments: PopulatedComment[];
+      }>(
+        'comments.author',
+        'username email followers isSuspended profileVisibility',
+      )
+      .populate(
+        'comments.replies.author',
+        'username email followers isSuspended profileVisibility',
+      )
+      .exec();
+
+    return mapPostDocumentsToFeedModels(posts);
   }
 
   private async getPublicViewerContext(

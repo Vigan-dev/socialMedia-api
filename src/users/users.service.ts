@@ -43,7 +43,16 @@ const MAX_AVATAR_URL_LENGTH = 2048;
 type UserPageQuery = {
   cursor?: string;
   limit?: string;
+  query?: string;
 };
+
+function escapeRegularExpression(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeUserSearchQuery(value?: string) {
+  return value?.trim().replace(/^@+/, '').toLocaleLowerCase('en-US') ?? '';
+}
 
 @Injectable()
 export class UsersService {
@@ -319,11 +328,31 @@ export class UsersService {
       ...this.toObjectIds(hiddenUserIds),
     ];
 
+    const searchQuery = normalizeUserSearchQuery(query.query);
+
+    if (searchQuery.length > 50) {
+      throw new BadRequestException(
+        'User search query must be 50 characters or less',
+      );
+    }
+
+    const filter: QueryFilter<UserDocument> = {
+      isSuspended: false,
+      ...(excludedIds.length ? { _id: { $nin: excludedIds } } : {}),
+      ...(searchQuery
+        ? {
+            usernameLower: {
+              $regex: `^${escapeRegularExpression(searchQuery)}`,
+            },
+          }
+        : {}),
+    };
+
     return this.findNetworkUserPage({
       currentUserId,
-      filter: excludedIds.length ? { _id: { $nin: excludedIds } } : {},
+      filter,
       query,
-      scope: 'users',
+      scope: searchQuery ? `users-search:${searchQuery}` : 'users',
     });
   }
 
@@ -413,6 +442,7 @@ export class UsersService {
           $match: {
             _id: { $nin: excludedIds },
             followRequests: { $ne: viewerObjectId },
+            isSuspended: false,
           },
         },
         {

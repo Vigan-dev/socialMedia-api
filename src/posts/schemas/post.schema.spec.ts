@@ -19,6 +19,19 @@ describe('PostSchema validation', () => {
 
     await expect(post.validate()).resolves.toBeUndefined();
     expect(post.savedBy).toEqual([]);
+    expect(post.hashtags).toEqual([]);
+  });
+
+  it('derives normalized hashtags during validation', async () => {
+    const post = new PostValidationModel({
+      author,
+      content: 'Building with #NestJS and #nestjs today',
+      mediaUrls: [],
+    });
+
+    await post.validate();
+
+    expect(post.hashtags).toEqual(['nestjs']);
   });
 
   it('allows a post with media and no text', async () => {

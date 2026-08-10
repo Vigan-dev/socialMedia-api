@@ -38,8 +38,13 @@ export class UsersController {
     @Req() request: RequestWithUser,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
+    @Query('q') query?: string,
   ) {
-    return this.usersService.findAll(request.user?.id, { cursor, limit });
+    return this.usersService.findAll(request.user?.id, {
+      cursor,
+      limit,
+      query,
+    });
   }
 
   @Get('me')

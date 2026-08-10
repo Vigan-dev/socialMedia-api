@@ -15,6 +15,10 @@ This service powers the Next.js frontend, stores data in MongoDB, and exposes RE
 - User profiles, avatars, status, privacy, and notification settings
 - Public/private accounts, follow requests, block, mute, and user suggestions
 - Posts, likes, comments, replies, saved posts, collections, hiding, and feed visibility filtering
+- Indexed hashtags, trending topics, ranked discovery posts, and server-wide
+  people/post search
+- Personalized recommendation feed with bounded interaction signals and
+  creator-diversity ranking
 - Reporting for posts, comments, and users
 - Moderator report queue
 - Admin dashboard data and admin-only actions
