@@ -39,6 +39,7 @@ type PostDocumentObject = {
   likedBy?: Types.ObjectId[];
   mediaUrls?: string[];
   savedBy?: Types.ObjectId[];
+  searchScore?: number;
 };
 
 function isPopulatedAuthor(
@@ -95,6 +96,7 @@ export function mapPostDocumentToFeedModel(
     likedBy: data.likedBy ?? [],
     mediaUrls: data.mediaUrls ?? [],
     savedBy: data.savedBy ?? [],
+    searchScore: data.searchScore,
   };
 }
 

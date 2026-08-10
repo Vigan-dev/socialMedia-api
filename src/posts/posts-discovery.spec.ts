@@ -9,6 +9,7 @@ describe('PostsService discovery', () => {
     exec: jest.Mock;
     limit: jest.Mock;
     populate: jest.Mock;
+    select: jest.Mock;
     sort: jest.Mock;
   };
   let postModel: {
@@ -26,6 +27,7 @@ describe('PostsService discovery', () => {
       exec: jest.fn().mockResolvedValue([]),
       limit: jest.fn().mockReturnThis(),
       populate: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
       sort: jest.fn().mockReturnThis(),
     };
     aggregateExec = jest.fn().mockResolvedValue([]);
@@ -51,10 +53,11 @@ describe('PostsService discovery', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
   });
 
-  it('filters hidden, blocked, suspended, and inaccessible private authors before search', async () => {
+  it('uses the text index after applying post and author visibility filters', async () => {
     const hiddenAuthorId = new Types.ObjectId();
     const privateAuthorId = new Types.ObjectId();
     relationshipService.getViewerVisibility.mockResolvedValue({
@@ -74,9 +77,12 @@ describe('PostsService discovery', () => {
       isArchived: { $ne: true },
       isHidden: { $ne: true },
     });
-    const contentExpression = filter.$and[1].content as RegExp;
-    expect(contentExpression).toBeInstanceOf(RegExp);
-    expect(contentExpression.source).toBe('nest\\.\\*');
+    expect(filter.$and[1]).toEqual({
+      $text: { $caseSensitive: false, $search: '"nest"' },
+    });
+    expect(postFindQuery.select).toHaveBeenCalledWith({
+      searchScore: { $meta: 'textScore' },
+    });
   });
 
   it('matches normalized hashtags exactly when a topic is selected', async () => {

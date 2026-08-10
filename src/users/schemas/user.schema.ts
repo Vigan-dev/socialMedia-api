@@ -144,6 +144,9 @@ export class User {
 
   @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
   mutedUsers!: Types.ObjectId[];
+
+  @Prop({ type: [String], default: [] })
+  mutedTopics!: string[];
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

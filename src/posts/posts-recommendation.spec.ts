@@ -34,6 +34,12 @@ describe('PostsService recommendation feed', () => {
         hiddenUserIds: new Set([hiddenAuthorId.toString()]),
       }),
     };
+    const recommendationFeedbackService = {
+      getRecommendationSignals: jest.fn().mockResolvedValue({
+        feedback: [],
+        mutedTopics: [],
+      }),
+    };
     const service = new PostsService(
       postModel as never,
       { find: jest.fn().mockReturnValue(inaccessibleUserQuery) } as never,
@@ -43,6 +49,7 @@ describe('PostsService recommendation feed', () => {
       {} as never,
       {} as never,
       {} as never,
+      recommendationFeedbackService as never,
     );
 
     await expect(

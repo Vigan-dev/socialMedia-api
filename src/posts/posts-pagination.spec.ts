@@ -76,6 +76,7 @@ describe('PostsService feed pagination', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
   });
 
@@ -88,6 +89,8 @@ describe('PostsService feed pagination', () => {
     expect(postModel.find).toHaveBeenCalledWith({
       author: { $nin: [privateAuthorId] },
       hiddenBy: { $ne: viewerId },
+      isArchived: { $ne: true },
+      isHidden: { $ne: true },
     });
   });
 
@@ -103,6 +106,8 @@ describe('PostsService feed pagination', () => {
     expect(postModel.find).toHaveBeenCalledWith({
       author: { $nin: [hiddenAuthorId] },
       hiddenBy: { $ne: viewerId },
+      isArchived: { $ne: true },
+      isHidden: { $ne: true },
     });
     expect(postQuery.limit).toHaveBeenCalledWith(3);
   });
@@ -123,6 +128,8 @@ describe('PostsService feed pagination', () => {
         $nin: [hiddenAuthorId],
       },
       hiddenBy: { $ne: viewerId },
+      isArchived: { $ne: true },
+      isHidden: { $ne: true },
     });
   });
 
@@ -152,6 +159,8 @@ describe('PostsService feed pagination', () => {
         { _id: { $lt: firstPostId }, createdAt },
       ],
       hiddenBy: { $ne: viewerId },
+      isArchived: { $ne: true },
+      isHidden: { $ne: true },
     });
     expect(postQuery.sort).toHaveBeenLastCalledWith({
       _id: -1,

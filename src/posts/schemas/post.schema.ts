@@ -120,3 +120,7 @@ PostSchema.index({ likedBy: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ savedBy: 1, createdAt: -1, _id: -1 });
 PostSchema.index({ 'comments.author': 1, createdAt: -1, _id: -1 });
 PostSchema.index({ 'comments.replies.author': 1, createdAt: -1, _id: -1 });
+PostSchema.index(
+  { content: 'text' },
+  { default_language: 'english', name: 'post_content_text' },
+);

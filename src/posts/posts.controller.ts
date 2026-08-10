@@ -19,6 +19,7 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { CreateReportDto } from './dto/create-report.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
+import { RecommendationFeedbackDto } from './dto/recommendation-feedback.dto';
 import { PostsService } from './posts.service';
 
 type RequestWithUser = Request & {
@@ -60,6 +61,30 @@ export class PostsController {
     @Query('limit') limit?: string,
   ) {
     return this.postsService.findTrendingTopics(request.user!.id, limit);
+  }
+
+  @Get('recommendation/preferences')
+  @UseGuards(JwtAuthGuard)
+  getRecommendationPreferences(@Req() request: RequestWithUser) {
+    return this.postsService.getRecommendationPreferences(request.user!.id);
+  }
+
+  @Put('recommendation/topics/:topic/mute')
+  @UseGuards(JwtAuthGuard)
+  muteRecommendationTopic(
+    @Param('topic') topic: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.muteRecommendationTopic(request.user!.id, topic);
+  }
+
+  @Delete('recommendation/topics/:topic/mute')
+  @UseGuards(JwtAuthGuard)
+  unmuteRecommendationTopic(
+    @Param('topic') topic: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.unmuteRecommendationTopic(request.user!.id, topic);
   }
 
   @Get()
@@ -136,6 +161,34 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   hidePost(@Param('id') id: string, @Req() request: RequestWithUser) {
     return this.postsService.hidePost(id, request.user!);
+  }
+
+  @Post(':id/recommendation-feedback')
+  @UseGuards(JwtAuthGuard)
+  @RateLimit({
+    keyPrefix: 'posts:recommendation-feedback',
+    limit: 30,
+    ttlMs: 60_000,
+  })
+  recordRecommendationFeedback(
+    @Param('id') id: string,
+    @Body() body: RecommendationFeedbackDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.recordRecommendationFeedback(
+      request.user!.id,
+      id,
+      body.action,
+    );
+  }
+
+  @Delete(':id/recommendation-feedback')
+  @UseGuards(JwtAuthGuard)
+  removeRecommendationFeedback(
+    @Param('id') id: string,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.postsService.removeRecommendationFeedback(request.user!.id, id);
   }
 
   @Post('reports')

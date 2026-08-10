@@ -15,6 +15,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { RateLimitGuard } from './rate-limit/rate-limit.guard';
 import { UploadsModule } from './uploads/uploads.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     NotificationsModule,
     ConversationsModule,
     UploadsModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [

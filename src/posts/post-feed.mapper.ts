@@ -24,6 +24,7 @@ export class PostFeedMapper {
     post: PostWithAuthor,
     currentUserId?: string,
     hiddenAuthorIds = new Set<string>(),
+    recommendationReasons?: string[],
   ): FeedPostResponse {
     const authorName = post.author?.username ?? 'Unknown User';
     const createdAt = post.createdAt ?? new Date();
@@ -33,6 +34,7 @@ export class PostFeedMapper {
       authorId: post.author?._id?.toString(),
       user: authorName,
       handle: `@${authorName.toLowerCase().replace(/\s+/g, '_')}`,
+      hashtags: post.hashtags ?? [],
       avatarBg: 'from-indigo-600 to-violet-600',
       avatarText: authorName.slice(0, 2).toUpperCase(),
       avatarUrl: post.author?.avatarUrl || null,
@@ -40,6 +42,9 @@ export class PostFeedMapper {
       time: createdAt.toISOString(),
       likes: (post.likedBy ?? []).length,
       mediaUrls: post.mediaUrls ?? [],
+      ...(recommendationReasons
+        ? { recommendation: { reasons: recommendationReasons } }
+        : {}),
       comments:
         post.commentsCount ?? this.countResponseComments(post.comments ?? []),
       commentItems: (post.comments ?? [])
@@ -122,6 +127,7 @@ export class PostFeedMapper {
       comments,
       content: feedPost.content,
       handle: feedPost.handle,
+      hashtags: feedPost.hashtags,
       id: feedPost.id,
       likes: feedPost.likes,
       mediaUrls: feedPost.mediaUrls,

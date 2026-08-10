@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import type { PostWithAuthor } from './post-feed.types';
 import {
   buildRecommendationProfile,
+  explainRecommendedPost,
   rankRecommendedPosts,
   scoreRecommendedPost,
 } from './post-recommendation';
@@ -117,5 +118,65 @@ describe('post recommendation ranking', () => {
         (post) => post.author?._id.toString() === otherAuthorId.toString(),
       ),
     ).toBe(true);
+  });
+
+  it('uses negative feedback to exclude the post and lower similar topics', () => {
+    const viewerId = new Types.ObjectId();
+    const authorId = new Types.ObjectId();
+    const rejectedPostId = new Types.ObjectId();
+    const profile = buildRecommendationProfile({
+      feedback: [
+        {
+          action: 'show_fewer',
+          author: authorId,
+          post: rejectedPostId,
+          topics: ['crypto'],
+        },
+      ],
+      followingIds: [],
+      signals: [],
+      viewerId: viewerId.toString(),
+    });
+    const similar = recommendedPost({ authorId, hashtags: ['crypto'] });
+    const unrelated = recommendedPost({ hashtags: ['gardening'] });
+    const rejected = recommendedPost({ id: rejectedPostId });
+
+    expect(scoreRecommendedPost(similar, profile, now)).toBeLessThan(
+      scoreRecommendedPost(unrelated, profile, now),
+    );
+    expect(
+      rankRecommendedPosts([rejected, unrelated], profile, 2, now),
+    ).toEqual([unrelated]);
+  });
+
+  it('removes muted topics and explains positive ranking signals', () => {
+    const viewerId = new Types.ObjectId();
+    const followedAuthorId = new Types.ObjectId();
+    const profile = buildRecommendationProfile({
+      followingIds: [followedAuthorId],
+      mutedTopics: ['spoilers'],
+      signals: [
+        {
+          _id: new Types.ObjectId(),
+          author: new Types.ObjectId(),
+          hashtags: ['typescript'],
+          savedBy: [viewerId],
+        },
+      ],
+      viewerId: viewerId.toString(),
+    });
+    const relevant = recommendedPost({
+      authorId: followedAuthorId,
+      hashtags: ['typescript'],
+    });
+    const muted = recommendedPost({ hashtags: ['spoilers'] });
+
+    expect(rankRecommendedPosts([muted, relevant], profile, 2, now)).toEqual([
+      relevant,
+    ]);
+    expect(explainRecommendedPost(relevant, profile)).toEqual([
+      'Because you engage with #typescript',
+      'Because you follow this creator',
+    ]);
   });
 });

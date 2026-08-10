@@ -35,6 +35,7 @@ export type FeedPostResponse = {
   comments: number;
   content: string;
   handle: string;
+  hashtags: string[];
   id: string;
   isFollowing: boolean;
   isLiked: boolean;
@@ -42,6 +43,9 @@ export type FeedPostResponse = {
   isSaved: boolean;
   likes: number;
   mediaUrls: string[];
+  recommendation?: {
+    reasons: string[];
+  };
   time: string;
   user: string;
 };
@@ -54,6 +58,7 @@ export type PublicPostResponse = Omit<
   | 'isLiked'
   | 'isOwnPost'
   | 'isSaved'
+  | 'recommendation'
 > & {
   commentItems: PublicCommentResponse[];
 };

@@ -15,6 +15,11 @@ import {
 } from './schemas/saved-collection.schema';
 import { SavedPostsController } from './saved-posts.controller';
 import { SavedPostsService } from './saved-posts.service';
+import {
+  RecommendationFeedback,
+  RecommendationFeedbackSchema,
+} from './schemas/recommendation-feedback.schema';
+import { RecommendationFeedbackService } from './recommendation-feedback.service';
 
 @Module({
   imports: [
@@ -23,6 +28,10 @@ import { SavedPostsService } from './saved-posts.service';
       { name: Report.name, schema: ReportSchema },
       { name: User.name, schema: UserSchema },
       { name: SavedCollection.name, schema: SavedCollectionSchema },
+      {
+        name: RecommendationFeedback.name,
+        schema: RecommendationFeedbackSchema,
+      },
     ]),
     NotificationsModule,
     UsersModule,
@@ -33,6 +42,7 @@ import { SavedPostsService } from './saved-posts.service';
     PostReportsService,
     PostsService,
     SavedPostsService,
+    RecommendationFeedbackService,
   ],
   exports: [PostsService],
 })

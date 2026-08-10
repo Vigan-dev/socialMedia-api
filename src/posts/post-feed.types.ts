@@ -40,6 +40,7 @@ export type PostWithAuthor = {
   hashtags?: string[];
   likedBy: Types.ObjectId[];
   savedBy?: Types.ObjectId[];
+  searchScore?: number;
   mediaUrls?: string[];
   isArchived?: boolean;
   isHidden?: boolean;

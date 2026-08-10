@@ -15,10 +15,21 @@ export type RecommendationSignal = {
   savedBy?: Types.ObjectId[];
 };
 
+export type RecommendationFeedbackSignal = {
+  action: 'not_interested' | 'show_fewer';
+  author: Types.ObjectId;
+  post: Types.ObjectId;
+  topics?: string[];
+};
+
 export type RecommendationProfile = {
   creatorWeights: Map<string, number>;
+  excludedPostIds: Set<string>;
   followingIds: Set<string>;
   interactedPostIds: Set<string>;
+  mutedTopics: Set<string>;
+  negativeCreatorWeights: Map<string, number>;
+  negativeTopicWeights: Map<string, number>;
   topicWeights: Map<string, number>;
   viewerId: string;
 };
@@ -54,16 +65,23 @@ function incrementWeight(
 }
 
 export function buildRecommendationProfile({
+  feedback = [],
   followingIds,
+  mutedTopics = [],
   signals,
   viewerId,
 }: {
+  feedback?: RecommendationFeedbackSignal[];
   followingIds: Types.ObjectId[];
+  mutedTopics?: string[];
   signals: RecommendationSignal[];
   viewerId: string;
 }): RecommendationProfile {
   const creatorWeights = new Map<string, number>();
+  const excludedPostIds = new Set<string>();
   const interactedPostIds = new Set<string>();
+  const negativeCreatorWeights = new Map<string, number>();
+  const negativeTopicWeights = new Map<string, number>();
   const topicWeights = new Map<string, number>();
 
   for (const signal of signals) {
@@ -98,10 +116,31 @@ export function buildRecommendationProfile({
     }
   }
 
+  for (const item of feedback) {
+    const creatorPenalty = item.action === 'show_fewer' ? 5 : 2;
+    const topicPenalty = item.action === 'show_fewer' ? 6 : 3;
+
+    excludedPostIds.add(item.post.toString());
+    incrementWeight(
+      negativeCreatorWeights,
+      item.author.toString(),
+      creatorPenalty,
+      30,
+    );
+
+    for (const topic of item.topics ?? []) {
+      incrementWeight(negativeTopicWeights, topic, topicPenalty, 40);
+    }
+  }
+
   return {
     creatorWeights,
+    excludedPostIds,
     followingIds: new Set(followingIds.map((id) => id.toString())),
     interactedPostIds,
+    mutedTopics: new Set(mutedTopics),
+    negativeCreatorWeights,
+    negativeTopicWeights,
     topicWeights,
     viewerId,
   };
@@ -130,6 +169,18 @@ export function scoreRecommendedPost(
   const creatorScore = Math.min(6, profile.creatorWeights.get(authorId) ?? 0);
   const followingScore = profile.followingIds.has(authorId) ? 4 : 0;
   const discoveryBoost = profile.followingIds.has(authorId) ? 0 : 1.5;
+  const creatorPenalty = Math.min(
+    12,
+    profile.negativeCreatorWeights.get(authorId) ?? 0,
+  );
+  const topicPenalty = Math.min(
+    20,
+    (post.hashtags ?? []).reduce(
+      (score, hashtag) =>
+        score + (profile.negativeTopicWeights.get(hashtag) ?? 0),
+      0,
+    ),
+  );
   const interactionPenalty = profile.interactedPostIds.has(post._id.toString())
     ? -6
     : 0;
@@ -141,8 +192,45 @@ export function scoreRecommendedPost(
     creatorScore +
     followingScore +
     discoveryBoost +
-    interactionPenalty
+    interactionPenalty -
+    creatorPenalty -
+    topicPenalty
   );
+}
+
+export function explainRecommendedPost(
+  post: PostWithAuthor,
+  profile: RecommendationProfile,
+) {
+  const authorId = post.author?._id.toString() ?? '';
+  const matchingTopics = (post.hashtags ?? [])
+    .filter((topic) => (profile.topicWeights.get(topic) ?? 0) > 0)
+    .sort(
+      (left, right) =>
+        (profile.topicWeights.get(right) ?? 0) -
+        (profile.topicWeights.get(left) ?? 0),
+    );
+  const reasons: string[] = [];
+
+  if (matchingTopics.length > 0) {
+    reasons.push(`Because you engage with #${matchingTopics[0]}`);
+  }
+
+  if (profile.followingIds.has(authorId)) {
+    reasons.push('Because you follow this creator');
+  } else if ((profile.creatorWeights.get(authorId) ?? 0) > 0) {
+    reasons.push('Because you engage with this creator');
+  }
+
+  if ((post.likedBy?.length ?? 0) + (post.commentsCount ?? 0) >= 5) {
+    reasons.push('Popular with people in your network');
+  }
+
+  if (reasons.length === 0) {
+    reasons.push('Suggested to help you discover something new');
+  }
+
+  return reasons.slice(0, 3);
 }
 
 export function rankRecommendedPosts(
@@ -152,7 +240,12 @@ export function rankRecommendedPosts(
   now = Date.now(),
 ) {
   const ranked = [...posts]
-    .filter((post) => Boolean(post.author))
+    .filter(
+      (post) =>
+        Boolean(post.author) &&
+        !profile.excludedPostIds.has(post._id.toString()) &&
+        !(post.hashtags ?? []).some((topic) => profile.mutedTopics.has(topic)),
+    )
     .sort(
       (left, right) =>
         scoreRecommendedPost(right, profile, now) -

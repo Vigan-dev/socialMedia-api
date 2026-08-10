@@ -32,9 +32,12 @@ import { SavedPostsService } from './saved-posts.service';
 import { isValidHashtag, normalizeHashtag } from './post-hashtags';
 import {
   buildRecommendationProfile,
+  explainRecommendedPost,
   rankRecommendedPosts,
 } from './post-recommendation';
 import type { RecommendationSignal } from './post-recommendation';
+import { RecommendationFeedbackService } from './recommendation-feedback.service';
+import type { RecommendationFeedbackAction } from './schemas/recommendation-feedback.schema';
 
 type AuthUser = {
   id: string;
@@ -59,7 +62,11 @@ type DiscoveryQuery = {
 };
 
 type SearchQuery = {
+  author?: string;
+  dateFrom?: string;
+  dateTo?: string;
   limit?: string;
+  media?: 'all' | 'image' | 'text';
   query?: string;
 };
 
@@ -90,6 +97,27 @@ function escapeRegularExpression(value: string) {
 
 function parseDiscoveryLimit(value?: string, fallback = 12) {
   return Math.min(Math.max(Number(value) || fallback, 1), 30);
+}
+
+function buildTextSearchQuery(value: string) {
+  return (value.match(/[\p{L}\p{N}_-]+/gu) ?? [])
+    .slice(0, 10)
+    .map((term) => `"${term.replaceAll('"', '')}"`)
+    .join(' ');
+}
+
+function parseSearchDate(value: string, endOfDay = false) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException('Search dates must be valid ISO dates');
+  }
+
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    date.setUTCHours(23, 59, 59, 999);
+  }
+
+  return date;
 }
 
 function decodeLatestFeedCursor(cursor: string): LatestFeedCursor {
@@ -159,6 +187,7 @@ export class PostsService {
     private readonly postReportsService: PostReportsService,
     private readonly configService: ConfigService,
     private readonly savedPostsService: SavedPostsService,
+    private readonly recommendationFeedbackService: RecommendationFeedbackService,
   ) {}
 
   async discover(
@@ -196,23 +225,103 @@ export class PostsService {
     const normalizedTag = searchQuery.startsWith('#')
       ? normalizeHashtag(searchQuery)
       : '';
-    const contentExpression = new RegExp(
-      escapeRegularExpression(searchQuery),
-      'i',
-    );
+    const textSearch = buildTextSearchQuery(searchQuery);
+
+    if (!normalizedTag && !textSearch) {
+      throw new BadRequestException('Search query must contain text');
+    }
+
+    const constraints = await this.buildSearchConstraints(query);
     const searchFilter = normalizedTag
-      ? {
-          $or: [{ hashtags: normalizedTag }, { content: contentExpression }],
-        }
-      : { content: contentExpression };
+      ? { hashtags: normalizedTag }
+      : { $text: { $caseSensitive: false, $search: textSearch } };
 
     return this.findRankedDiscoveryPosts(
-      { $and: [context.filter, searchFilter] },
+      { $and: [context.filter, searchFilter, ...constraints] },
       context,
       userId,
       parseDiscoveryLimit(query.limit, 20),
       searchQuery,
+      !normalizedTag,
     );
+  }
+
+  async searchHashtags(userId: string, query: SearchQuery) {
+    const searchQuery = query.query?.trim() ?? '';
+
+    if (searchQuery.length < 2 || searchQuery.length > 80) {
+      throw new BadRequestException(
+        'Search query must be between 2 and 80 characters',
+      );
+    }
+
+    const requestedTopic = normalizeHashtag(searchQuery);
+    if (!isValidHashtag(requestedTopic)) return [];
+
+    const context = await this.getDiscoverablePostContext(userId);
+    const constraints = await this.buildSearchConstraints(query);
+    const topicExpression = new RegExp(
+      `^${escapeRegularExpression(requestedTopic)}`,
+      'i',
+    );
+    const limit = Math.min(parseDiscoveryLimit(query.limit, 10), 20);
+
+    const topics = await this.postModel
+      .aggregate<{ postCount: number; tag: string }>([
+        {
+          $match: {
+            $and: [
+              context.filter,
+              { hashtags: topicExpression },
+              ...constraints,
+            ],
+          },
+        },
+        { $unwind: '$hashtags' },
+        { $match: { hashtags: topicExpression } },
+        { $group: { _id: '$hashtags', postCount: { $sum: 1 } } },
+        { $sort: { postCount: -1, _id: 1 } },
+        { $limit: limit },
+        { $project: { _id: 0, postCount: 1, tag: '$_id' } },
+      ])
+      .exec();
+
+    return topics.map((topic) => ({
+      ...topic,
+      tag: `#${topic.tag}`,
+    }));
+  }
+
+  async recordRecommendationFeedback(
+    userId: string,
+    postId: string,
+    action: RecommendationFeedbackAction,
+  ) {
+    const post = await this.findAccessiblePostOrThrow(postId, userId);
+    return this.recommendationFeedbackService.recordPostFeedback(
+      userId,
+      post,
+      action,
+    );
+  }
+
+  removeRecommendationFeedback(userId: string, postId: string) {
+    return this.recommendationFeedbackService.removePostFeedback(
+      userId,
+      postId,
+    );
+  }
+
+  getRecommendationPreferences(userId: string) {
+    return this.recommendationFeedbackService.getPreferences(userId);
+  }
+
+  muteRecommendationTopic(userId: string, topic: string) {
+    return this.recommendationFeedbackService.muteTopic(userId, topic);
+  }
+
+  unmuteRecommendationTopic(userId: string, topic: string) {
+    return this.recommendationFeedbackService.unmuteTopic(userId, topic);
   }
 
   async findTrendingTopics(userId: string, requestedLimit?: string) {
@@ -292,9 +401,9 @@ export class PostsService {
         : null;
     const queryLimit =
       sort === 'trending' ? limit * recentTrendingWindowMultiplier : limit + 1;
-    const postQuery: Record<string, unknown> = userId
-      ? { hiddenBy: { $ne: new Types.ObjectId(userId) } }
-      : {};
+    const postQuery: Record<string, unknown> = this.getPublicPostFilter(
+      userId ? new Types.ObjectId(userId) : undefined,
+    );
     const hiddenAuthorObjectIds = [...hiddenAuthorIds]
       .filter((id) => Types.ObjectId.isValid(id))
       .map((id) => new Types.ObjectId(id));
@@ -1093,35 +1202,57 @@ export class PostsService {
     limit: number,
   ): Promise<FeedPageResponse> {
     const viewerObjectId = new Types.ObjectId(userId);
-    const context = await this.getDiscoverablePostContext(userId);
-    const signalDocuments = await this.postModel
-      .find({
-        $or: [
-          { author: viewerObjectId },
-          { likedBy: viewerObjectId },
-          { savedBy: viewerObjectId },
-          { 'comments.author': viewerObjectId },
-          { 'comments.replies.author': viewerObjectId },
-        ],
-        isArchived: { $ne: true },
-        isHidden: { $ne: true },
-      })
-      .select(
-        '_id author hashtags likedBy savedBy comments.author comments.replies.author',
-      )
-      .sort({ createdAt: -1, _id: -1 })
-      .limit(100)
-      .exec();
+    const [context, signalDocuments, preferences] = await Promise.all([
+      this.getDiscoverablePostContext(userId),
+      this.postModel
+        .find({
+          $or: [
+            { author: viewerObjectId },
+            { likedBy: viewerObjectId },
+            { savedBy: viewerObjectId },
+            { 'comments.author': viewerObjectId },
+            { 'comments.replies.author': viewerObjectId },
+          ],
+          isArchived: { $ne: true },
+          isHidden: { $ne: true },
+        })
+        .select(
+          '_id author hashtags likedBy savedBy comments.author comments.replies.author',
+        )
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(100)
+        .exec(),
+      this.recommendationFeedbackService.getRecommendationSignals(userId),
+    ]);
     const signals = signalDocuments.map((post) =>
       post.toObject<RecommendationSignal>({ depopulate: true }),
     );
     const profile = buildRecommendationProfile({
+      feedback: preferences.feedback,
       followingIds: context.followingIds,
+      mutedTopics: preferences.mutedTopics,
       signals,
       viewerId: userId,
     });
+    const excludedPostIds = [...profile.excludedPostIds]
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+    const preferenceFilters: Record<string, unknown>[] = [];
+
+    if (excludedPostIds.length > 0) {
+      preferenceFilters.push({ _id: { $nin: excludedPostIds } });
+    }
+
+    if (profile.mutedTopics.size > 0) {
+      preferenceFilters.push({ hashtags: { $nin: [...profile.mutedTopics] } });
+    }
+
     const candidateFilter = {
-      $and: [context.filter, { author: { $ne: viewerObjectId } }],
+      $and: [
+        context.filter,
+        { author: { $ne: viewerObjectId } },
+        ...preferenceFilters,
+      ],
     };
     const candidates = await this.findPopulatedPostCandidates(
       candidateFilter,
@@ -1132,7 +1263,12 @@ export class PostsService {
     return {
       hasMore: false,
       items: rankedPosts.map((post) =>
-        this.postFeedMapper.toFeedPost(post, userId, context.hiddenAuthorIds),
+        this.postFeedMapper.toFeedPost(
+          post,
+          userId,
+          context.hiddenAuthorIds,
+          explainRecommendedPost(post, profile),
+        ),
       ),
       nextCursor: null,
     };
@@ -1144,10 +1280,12 @@ export class PostsService {
     userId: string,
     limit: number,
     searchQuery = '',
+    useTextScore = false,
   ) {
     const posts = await this.findPopulatedPostCandidates(
       filter,
       Math.min(limit * discoveryCandidateMultiplier, maxDiscoveryCandidates),
+      useTextScore,
     );
     const normalizedSearch = searchQuery.toLocaleLowerCase('en-US');
 
@@ -1165,9 +1303,13 @@ export class PostsService {
             post.content.toLocaleLowerCase('en-US').includes(normalizedSearch)
               ? 10
               : 0;
+          const textScore = (post.searchScore ?? 0) * 8;
 
           return (
-            this.postFeedMapper.scorePost(post) + recencyScore + exactTopicBoost
+            this.postFeedMapper.scorePost(post) +
+            recencyScore +
+            exactTopicBoost +
+            textScore
           );
         };
 
@@ -1185,10 +1327,18 @@ export class PostsService {
   private async findPopulatedPostCandidates(
     filter: Record<string, unknown>,
     candidateLimit: number,
+    useTextScore = false,
   ) {
-    const posts = await this.postModel
-      .find(filter)
-      .sort({ createdAt: -1, _id: -1 })
+    const query = this.postModel.find(filter);
+
+    if (useTextScore) {
+      query.select({ searchScore: { $meta: 'textScore' } });
+      query.sort({ searchScore: { $meta: 'textScore' }, createdAt: -1 });
+    } else {
+      query.sort({ createdAt: -1, _id: -1 });
+    }
+
+    const posts = await query
       .limit(candidateLimit)
       .populate<{
         author: PopulatedAuthor;
@@ -1209,6 +1359,44 @@ export class PostsService {
       .exec();
 
     return mapPostDocumentsToFeedModels(posts);
+  }
+
+  private async buildSearchConstraints(query: SearchQuery) {
+    const constraints: Record<string, unknown>[] = [];
+
+    if (query.media === 'image') {
+      constraints.push({ 'mediaUrls.0': { $exists: true } });
+    } else if (query.media === 'text') {
+      constraints.push({ 'mediaUrls.0': { $exists: false } });
+    }
+
+    if (query.dateFrom || query.dateTo) {
+      const createdAt: { $gte?: Date; $lte?: Date } = {};
+
+      if (query.dateFrom) createdAt.$gte = parseSearchDate(query.dateFrom);
+      if (query.dateTo) createdAt.$lte = parseSearchDate(query.dateTo, true);
+      if (createdAt.$gte && createdAt.$lte && createdAt.$gte > createdAt.$lte) {
+        throw new BadRequestException(
+          'Search start date must be before end date',
+        );
+      }
+
+      constraints.push({ createdAt });
+    }
+
+    const requestedAuthor = query.author?.trim().replace(/^@+/, '');
+    if (requestedAuthor) {
+      const author = await this.userModel
+        .findOne({ usernameLower: requestedAuthor.toLocaleLowerCase('en-US') })
+        .select('_id')
+        .exec();
+
+      constraints.push(
+        author ? { author: author._id } : { author: { $in: [] } },
+      );
+    }
+
+    return constraints;
   }
 
   private async getPublicViewerContext(
