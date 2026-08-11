@@ -147,7 +147,7 @@ export class ConversationsService {
           },
         },
         {
-          new: true,
+          returnDocument: 'after',
           setDefaultsOnInsert: true,
           upsert: true,
         },

@@ -7,6 +7,7 @@ import { UsersService } from './users.service';
 describe('UsersService relationships', () => {
   let service: UsersService;
   let userModel: {
+    deleteOne: jest.Mock;
     exists: jest.Mock;
     findOne: jest.Mock;
     findById: jest.Mock;
@@ -26,6 +27,7 @@ describe('UsersService relationships', () => {
 
   beforeEach(() => {
     userModel = {
+      deleteOne: jest.fn(),
       exists: jest.fn(),
       findOne: jest.fn(),
       findById: jest.fn(),
@@ -53,6 +55,19 @@ describe('UsersService relationships', () => {
       targetObjectId: new Types.ObjectId(targetUserId),
     });
     relationshipService.getHiddenUserIds.mockResolvedValue(new Set<string>());
+  });
+
+  it('deletes only the matching unverified registration', async () => {
+    userModel.deleteOne.mockResolvedValue({ deletedCount: 1 });
+
+    await expect(
+      service.deleteUnverifiedRegistration(currentUserId),
+    ).resolves.toBeUndefined();
+
+    expect(userModel.deleteOne).toHaveBeenCalledWith({
+      _id: currentUserId,
+      isEmailVerified: false,
+    });
   });
 
   it('follows a user and creates a follow notification', async () => {

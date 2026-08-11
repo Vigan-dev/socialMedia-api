@@ -31,6 +31,9 @@ describe('AuthService', () => {
     >;
     clearFailedLoginState: jest.Mock;
     create: jest.MockedFunction<UsersService['create']>;
+    deleteUnverifiedRegistration: jest.MockedFunction<
+      UsersService['deleteUnverifiedRegistration']
+    >;
     disableTwoFactorAndInvalidateSessions: jest.Mock;
     enableTwoFactor: jest.Mock;
     findByEmail: jest.MockedFunction<(email: string) => Promise<unknown>>;
@@ -103,6 +106,7 @@ describe('AuthService', () => {
         ReturnType<UsersService['create']>,
         Parameters<UsersService['create']>
       >(),
+      deleteUnverifiedRegistration: jest.fn(),
       disableTwoFactorAndInvalidateSessions: jest.fn(),
       enableTwoFactor: jest.fn(),
       findByEmail: jest.fn<Promise<unknown>, [email: string]>(),
@@ -271,6 +275,7 @@ describe('AuthService', () => {
   it('registers an unverified account and emails a one-time verification link', async () => {
     usersService.create.mockResolvedValue({
       email: 'new@example.com',
+      id: 'user-1',
     } as never);
 
     const result = await service.register(
@@ -301,6 +306,24 @@ describe('AuthService', () => {
         expiresInHours: 24,
         to: 'new@example.com',
       }),
+    );
+    expect(usersService.deleteUnverifiedRegistration).not.toHaveBeenCalled();
+  });
+
+  it('deletes a new account when its verification email cannot be delivered', async () => {
+    const deliveryError = new Error('SMTP delivery failed');
+    usersService.create.mockResolvedValue({
+      email: 'new@example.com',
+      id: 'user-1',
+    } as never);
+    mailProvider.sendEmailVerificationEmail.mockRejectedValue(deliveryError);
+
+    await expect(
+      service.register('new-user', 'new@example.com', 'Password1'),
+    ).rejects.toBe(deliveryError);
+
+    expect(usersService.deleteUnverifiedRegistration).toHaveBeenCalledWith(
+      'user-1',
     );
   });
 

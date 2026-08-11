@@ -353,6 +353,17 @@ export class UsersService {
     return this.userResponseMapper.toProfile(user);
   }
 
+  async deleteUnverifiedRegistration(userId: string): Promise<void> {
+    const result = await this.userModel.deleteOne({
+      _id: userId,
+      isEmailVerified: false,
+    });
+
+    if (result.deletedCount !== 1) {
+      throw new Error('Unverified registration could not be deleted');
+    }
+  }
+
   async upsertAdminUser(userData: {
     email: string;
     password: string;

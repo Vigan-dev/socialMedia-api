@@ -99,7 +99,22 @@ export class AuthService {
       emailVerificationTokenHash: await bcrypt.hash(verificationToken, 10),
     });
 
-    await this.sendEmailVerification(user.email, verificationToken);
+    try {
+      await this.sendEmailVerification(user.email, verificationToken);
+    } catch (error) {
+      try {
+        await this.usersService.deleteUnverifiedRegistration(user.id);
+      } catch (cleanupError) {
+        this.logger.error(
+          `Failed to roll back registration for user ${user.id}`,
+          cleanupError instanceof Error
+            ? cleanupError.stack
+            : String(cleanupError),
+        );
+      }
+
+      throw error;
+    }
 
     return this.canExposeSecurityTokens()
       ? {

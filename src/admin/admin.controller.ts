@@ -15,6 +15,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { roleGroups } from '../auth/roles';
+import { AdminIdParamDto } from './dto/admin-id-param.dto';
+import {
+  AdminReportsQueryDto,
+  AdminUsersQueryDto,
+} from './dto/admin-query.dto';
+import { UpdateReportDto } from './dto/update-report.dto';
+import { UpdateUserSuspensionDto } from './dto/update-user-suspension.dto';
 
 type RequestWithUser = Request & {
   user?: {
@@ -41,22 +48,26 @@ export class AdminController {
   }
 
   @Get('users')
-  getUsers(@Query('q') query?: string) {
-    return this.adminService.getUsers(query);
+  getUsers(@Query() query: AdminUsersQueryDto) {
+    return this.adminService.getUsers(query.q);
   }
 
   @Patch('users/:id/suspension')
   updateUserSuspension(
-    @Param('id') id: string,
-    @Body() body: { isSuspended?: boolean; reason?: string },
+    @Param() params: AdminIdParamDto,
+    @Body() body: UpdateUserSuspensionDto,
     @Req() request: RequestWithUser,
   ) {
-    return this.adminService.updateUserSuspension(id, body, request.user!);
+    return this.adminService.updateUserSuspension(
+      params.id,
+      body,
+      request.user!,
+    );
   }
 
   @Get('reports')
-  getReports(@Query('status') status?: string) {
-    return this.adminService.getReports(status);
+  getReports(@Query() query: AdminReportsQueryDto) {
+    return this.adminService.getReports(query.status);
   }
 
   @Get('audit-logs')
@@ -66,20 +77,30 @@ export class AdminController {
 
   @Patch('reports/:id')
   updateReport(
-    @Param('id') id: string,
-    @Body() body: { status?: string },
+    @Param() params: AdminIdParamDto,
+    @Body() body: UpdateReportDto,
     @Req() request: RequestWithUser,
   ) {
-    return this.adminService.updateReport(id, body.status, request.user!);
+    return this.adminService.updateReport(
+      params.id,
+      body.status,
+      request.user!,
+    );
   }
 
   @Delete('posts/:id')
-  deletePost(@Param('id') id: string, @Req() request: RequestWithUser) {
-    return this.adminService.deletePost(id, request.user!);
+  deletePost(
+    @Param() params: AdminIdParamDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.adminService.deletePost(params.id, request.user!);
   }
 
   @Delete('comments/:id')
-  deleteComment(@Param('id') id: string, @Req() request: RequestWithUser) {
-    return this.adminService.deleteComment(id, request.user!);
+  deleteComment(
+    @Param() params: AdminIdParamDto,
+    @Req() request: RequestWithUser,
+  ) {
+    return this.adminService.deleteComment(params.id, request.user!);
   }
 }

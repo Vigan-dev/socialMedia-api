@@ -1,3 +1,4 @@
+import { Transform, type TransformFnParams } from 'class-transformer';
 import {
   IsIn,
   IsISO8601,
@@ -6,6 +7,11 @@ import {
   Length,
   MaxLength,
 } from 'class-validator';
+import {
+  normalizeUnifiedSearchText,
+  UNIFIED_SEARCH_TEXT_MAX_LENGTH,
+  UNIFIED_SEARCH_TEXT_MIN_LENGTH,
+} from '../search-text';
 
 export const SEARCH_MEDIA_FILTERS = ['all', 'image', 'text'] as const;
 export const SEARCH_RESULT_TYPES = [
@@ -18,9 +24,15 @@ export const SEARCH_RESULT_TYPES = [
 export type SearchMediaFilter = (typeof SEARCH_MEDIA_FILTERS)[number];
 export type SearchResultType = (typeof SEARCH_RESULT_TYPES)[number];
 
+function transformSearchText(parameters: TransformFnParams): unknown {
+  const value = parameters.value as unknown;
+  return typeof value === 'string' ? normalizeUnifiedSearchText(value) : value;
+}
+
 export class UnifiedSearchQueryDto {
+  @Transform(transformSearchText)
   @IsString()
-  @Length(2, 80)
+  @Length(UNIFIED_SEARCH_TEXT_MIN_LENGTH, UNIFIED_SEARCH_TEXT_MAX_LENGTH)
   q!: string;
 
   @IsOptional()

@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PostsService } from '../posts/posts.service';
 import { UsersService } from '../users/users.service';
 import type { UnifiedSearchQueryDto } from './dto/unified-search-query.dto';
+import {
+  normalizeUnifiedSearchText,
+  UNIFIED_SEARCH_TEXT_MAX_LENGTH,
+  UNIFIED_SEARCH_TEXT_MIN_LENGTH,
+} from './search-text';
 
 @Injectable()
 export class SearchService {
@@ -11,6 +16,16 @@ export class SearchService {
   ) {}
 
   async search(userId: string, query: UnifiedSearchQueryDto) {
+    const searchText = normalizeUnifiedSearchText(query.q);
+    if (
+      searchText.length < UNIFIED_SEARCH_TEXT_MIN_LENGTH ||
+      searchText.length > UNIFIED_SEARCH_TEXT_MAX_LENGTH
+    ) {
+      throw new BadRequestException(
+        `Search query must be between ${UNIFIED_SEARCH_TEXT_MIN_LENGTH} and ${UNIFIED_SEARCH_TEXT_MAX_LENGTH} characters`,
+      );
+    }
+
     const requestedType = query.type ?? 'all';
     const include = (type: 'hashtags' | 'posts' | 'users') =>
       requestedType === 'all' || requestedType === type;
@@ -20,13 +35,16 @@ export class SearchService {
       dateTo: query.dateTo,
       limit: query.limit,
       media: query.media ?? 'all',
-      query: query.q,
+      query: searchText,
     };
 
     const [users, posts, hashtags] = await Promise.all([
       include('users')
         ? this.usersService
-            .findAll(userId, { limit: query.limit ?? '10', query: query.q })
+            .findAll(userId, {
+              limit: query.limit ?? '10',
+              query: searchText,
+            })
             .then((page) => page.items)
         : Promise.resolve([]),
       include('posts')
@@ -47,7 +65,7 @@ export class SearchService {
       },
       hashtags,
       posts,
-      query: query.q.trim(),
+      query: searchText,
       users,
     };
   }

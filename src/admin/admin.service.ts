@@ -21,8 +21,10 @@ import type {
   AuditLogDocument,
   AuditLogTargetType,
 } from './schemas/audit-log.schema';
-
-const REPORT_STATUSES = ['open', 'reviewed', 'dismissed', 'actioned'];
+import {
+  ADMIN_USER_SEARCH_MAX_LENGTH,
+  isAdminReportStatus,
+} from './admin.constants';
 
 type AdminUserRecord = Pick<
   User,
@@ -49,6 +51,16 @@ type AuditLogRecord = {
   targetId: string;
   targetType: AuditLogTargetType;
 };
+
+function escapeRegularExpression(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeAdminUserSearch(query: string) {
+  return escapeRegularExpression(
+    query.trim().slice(0, ADMIN_USER_SEARCH_MAX_LENGTH),
+  );
+}
 
 @Injectable()
 export class AdminService {
@@ -93,11 +105,12 @@ export class AdminService {
   }
 
   async getUsers(query = '') {
-    const filter = query.trim()
+    const safeQuery = normalizeAdminUserSearch(query);
+    const filter = safeQuery
       ? {
           $or: [
-            { username: { $regex: query.trim(), $options: 'i' } },
-            { email: { $regex: query.trim(), $options: 'i' } },
+            { username: { $regex: safeQuery, $options: 'i' } },
+            { email: { $regex: safeQuery, $options: 'i' } },
           ],
         }
       : {};
@@ -166,7 +179,7 @@ export class AdminService {
   }
 
   async getReports(status = 'open') {
-    const filter = REPORT_STATUSES.includes(status) ? { status } : {};
+    const filter = isAdminReportStatus(status) ? { status } : {};
     const reports = await this.reportModel
       .find(filter)
       .sort({ createdAt: -1 })
@@ -204,7 +217,7 @@ export class AdminService {
       throw new BadRequestException('Invalid report id');
     }
 
-    if (!REPORT_STATUSES.includes(status)) {
+    if (!isAdminReportStatus(status)) {
       throw new BadRequestException('Invalid report status');
     }
 
